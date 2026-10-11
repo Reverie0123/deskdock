@@ -15,7 +15,8 @@
     "README.md",
     "README.zh.md",
     "LICENSE",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "llms-install.md"
   ],
   "engines": {
     "node": ">=20"

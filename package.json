@@ -27,7 +27,9 @@
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
     "test": "node --test --test-concurrency=1 tests/*.test.mjs",
-    "test:e2e": "node tests/e2e/notepad.e2e.mjs"
+    "test:e2e": "node tests/e2e/notepad.e2e.mjs",
+    "build:tray": "g++ -O2 -std=c++17 -static -s -Wall -mwindows -municode -o resources/deskdock-tray.exe native/tray/tray.cpp -lshell32 -luser32 -lole32",
+    "tray": "start resources/deskdock-tray.exe"
   },
   "keywords": [
     "mcp",

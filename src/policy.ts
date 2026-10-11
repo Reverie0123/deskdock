@@ -36,6 +36,9 @@ export function policyDir(): string {
   return path.join(process.env.APPDATA ?? path.join(process.env.USERPROFILE ?? ".", "AppData", "Roaming"), "deskdock");
 }
 export function policyPath(): string { return path.join(policyDir(), "policy.json"); }
+/** The tray app creates this file while the user has paused DeskDock; every tool is refused until it is gone. */
+export function pausedPath(): string { return path.join(policyDir(), "paused"); }
+export function isPaused(): boolean { return existsSync(pausedPath()); }
 
 export class PolicyStore {
   private cached: Policy = DEFAULT_POLICY;

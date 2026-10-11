@@ -2,7 +2,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Helper, HelperError, type Screenshot, type Snapshot, type UiaNode, type WindowInfo } from "./helper.js";
-import { decide, PolicyStore, type Action } from "./policy.js";
+import { decide, isPaused, PolicyStore, type Action } from "./policy.js";
 import { Audit, redactArgs } from "./audit.js";
 import { Ocr, toScreen, formatOcr } from "./ocr.js";
 
@@ -77,6 +77,11 @@ export function registerTools(server: McpServer, deps: Deps): void {
       const t0 = Date.now();
       let win: WindowInfo | undefined;
       try {
+        if (isPaused()) {
+          const reason = "DeskDock is paused: the user paused it from the tray icon. Do not retry; tell the user and ask them to resume DeskDock (tray icon -> Pause) when they want you to continue.";
+          audit.write({ ts: new Date().toISOString(), tool, args: redactArgs(tool, args), outcome: "denied", detail: reason, ms: Date.now() - t0 });
+          return fail(reason);
+        }
         win = await target(args);
         if (win) {
           const d = decide(policy.levelFor(win.process, win.title), action, win.process, win.title);

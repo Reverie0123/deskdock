@@ -197,9 +197,10 @@ static json screenshot(const json& a) {
             SelectObject(mem2, o2); DeleteDC(mem2); SelectObject(mem, old); DeleteObject(bmp); bmp = bmp2; old = SelectObject(mem, bmp);
         }
     }
-    if (!ok) ok = BitBlt(mem, 0, 0, w, hgt, screen, r.left, r.top, SRCCOPY | CAPTUREBLT) != 0;
+    // a window capture never falls back to copying the screen area: that would include whatever is stacked on top
+    if (!ok && !h) ok = BitBlt(mem, 0, 0, w, hgt, screen, r.left, r.top, SRCCOPY | CAPTUREBLT) != 0;
     SelectObject(mem, old); DeleteDC(mem); ReleaseDC(nullptr, screen);
-    if (!ok) { DeleteObject(bmp); throw std::runtime_error("capture failed"); }
+    if (!ok) { DeleteObject(bmp); throw std::runtime_error(h ? "window capture failed (PrintWindow refused; focus the window and retry, or use screenshot without hwnd)" : "capture failed"); }
 
     Gdiplus::Bitmap* src = Gdiplus::Bitmap::FromHBITMAP(bmp, nullptr);
     Gdiplus::Bitmap* img = src;
@@ -304,7 +305,11 @@ static WORD vkFromName(std::string k) {
     if (k.size() == 1) { SHORT s = VkKeyScanW((wchar_t)k[0]); if (s != -1) return (WORD)(s & 0xff); }
     throw std::runtime_error("unknown key: " + k);
 }
-static bool keyNeedsShift(const std::string& k) { if (k.size() != 1) return false; SHORT s = VkKeyScanW((wchar_t)k[0]); return s != -1 && (s & 0x100); }
+static bool keyNeedsShift(const std::string& k) {
+    if (k.size() != 1) return false;
+    if (isalpha((unsigned char)k[0])) return false; // "Ctrl+A" means ctrl+a, never ctrl+shift+a
+    SHORT s = VkKeyScanW((wchar_t)k[0]); return s != -1 && (s & 0x100);
+}
 static json pressKeys(const json& a) {
     std::string combo = a.at("keys").get<std::string>();
     int repeat = min(max(a.value("repeat", 1), 1), 50);

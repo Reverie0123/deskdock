@@ -49,8 +49,9 @@ test("mcp server read-only tools", async (t) => {
       t.diagnostic("read_window(edge):\n" + tree.content[0].text.split("\n").slice(0, 14).join("\n"));
     }
 
-    const notepadLine = winText.split("\n").find((l) => /\[(notepad|explorer|SystemSettings|ApplicationFrameHost)\.exe\]/i.test(l));
-    const anyLine = notepadLine ?? winText.split("\n").find((l) => !l.includes("minimized") && !l.includes("[msedge.exe]"));
+    // prefer an ordinary opaque window: layered/transparent overlays make PrintWindow fail, which is reported, not hidden
+    const notepadLine = winText.split("\n").find((l) => /\[(claude|notepad|SystemSettings|ApplicationFrameHost)\.exe\]/i.test(l) && !l.includes("minimized"));
+    const anyLine = notepadLine ?? winText.split("\n").find((l) => !l.includes("minimized") && !l.includes("[msedge.exe]") && !/Overlay/.test(l));
     if (anyLine) {
       const hwnd = hwndOf(anyLine);
       const tree = await client.callTool({ name: "read_window", arguments: { hwnd, maxNodes: 80 } });

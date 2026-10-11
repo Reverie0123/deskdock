@@ -18,6 +18,14 @@ export interface Screenshot { png_base64: string; width: number; height: number;
 
 export class HelperError extends Error {}
 
+/** Replace lone UTF-16 surrogates (a cut-off emoji from the model) with U+FFFD; the helper's JSON parser rejects them. */
+export function wellFormed<T>(v: T): T {
+  if (typeof v === "string") return v.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD") as unknown as T;
+  if (Array.isArray(v)) return v.map(wellFormed) as unknown as T;
+  if (v && typeof v === "object") { const o: Record<string, unknown> = {}; for (const [k, x] of Object.entries(v as Record<string, unknown>)) o[k] = wellFormed(x); return o as unknown as T; }
+  return v;
+}
+
 export function helperPath(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const candidates = [
@@ -43,7 +51,7 @@ export class Helper {
   private ensure(): ChildProcessWithoutNullStreams {
     if (this.proc && this.proc.exitCode === null) return this.proc;
     const p = spawn(this.exe, this.args, { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
-    const failAll = (why: string) => { for (const [, pend] of this.pending) { clearTimeout(pend.timer); pend.reject(new HelperError(why)); } this.pending.clear(); if (this.proc === p) this.proc = null; };
+    const failAll = (why: string) => { if (this.proc !== p) return; for (const [, pend] of this.pending) { clearTimeout(pend.timer); pend.reject(new HelperError(why)); } this.pending.clear(); if (this.proc === p) this.proc = null; };
     p.on("error", (e) => failAll(`helper could not start: ${e.message}`));
     p.stdin.on("error", (e) => failAll(`helper pipe closed: ${e.message}`));
     p.stderr.on("data", (d) => process.stderr.write(`[deskdock-helper] ${d}`));
@@ -84,8 +92,7 @@ export class Helper {
       }, timeoutMs);
       this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer });
       // lone surrogates (a cut-off emoji from the model) are not valid JSON for the helper; strip them
-      const line = JSON.stringify({ id, op, args }).replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "�");
-      p.stdin.write(line + "\n");
+      p.stdin.write(JSON.stringify({ id, op, args: wellFormed(args) }) + "\n");
     });
     const next = this.queue.then(run, run);
     this.queue = next.catch(() => undefined);

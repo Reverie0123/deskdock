@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { Helper, HelperError } from "../dist/helper.js";
+import { Helper, HelperError, wellFormed } from "../dist/helper.js";
 
 const fake = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "fake-helper.mjs");
 
@@ -32,5 +32,16 @@ test("calls are serialized in order", async () => {
   try {
     const results = await Promise.all([1, 2, 3, 4, 5].map((i) => h.call("echo", { i })));
     assert.deepEqual(results.map((r) => r.echo.i), [1, 2, 3, 4, 5]);
+  } finally { h.close(); }
+});
+
+test("lone surrogates are replaced before reaching the helper", async () => {
+  assert.equal(wellFormed("a\uD83Db"), "a\uFFFDb");
+  assert.equal(wellFormed("ok \uD83D\uDE00 emoji"), "ok \uD83D\uDE00 emoji", "a valid pair is untouched");
+  assert.deepEqual(wellFormed({ t: ["\uDE00"], n: 1 }), { t: ["\uFFFD"], n: 1 });
+  const h = new Helper(process.execPath, [fake]);
+  try {
+    const r = await h.call("echo", { text: "broken \uD83D emoji" });
+    assert.equal(r.echo.text, "broken \uFFFD emoji", "the fake helper rejects lone surrogates like the real one, so this only passes if the Node side sanitized");
   } finally { h.close(); }
 });

@@ -60,3 +60,15 @@ test("strictest matching rule wins; unknown process is capped at read; keys are 
   assert.equal(store.levelFor("other.exe", "anything"), "full");
   rmSync(dir, { recursive: true, force: true });
 });
+
+test("unknown levels fail closed; title= matches the exact title only", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "deskdock-policy-"));
+  const file = path.join(dir, "policy.json");
+  writeFileSync(file, JSON.stringify({ version: 1, default: "ful", rules: { "bank.exe": "blcok", "title=运行": "click" } }));
+  const store = new PolicyStore(file);
+  assert.equal(store.levelFor("bank.exe", ""), "block", "a typo in a level must not loosen it");
+  assert.equal(store.levelFor("other.exe", ""), "read", "a typo in default must not mean full");
+  assert.equal(store.levelFor("explorer.exe", "运行"), "click");
+  assert.equal(store.levelFor("notepad.exe", "运行说明.txt - Notepad"), "read", "title= is exact, so other titles containing the word are untouched (default here is read)");
+  rmSync(dir, { recursive: true, force: true });
+});

@@ -319,9 +319,8 @@ export function registerTools(server: McpServer, deps: Deps): void {
     inputSchema: {},
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, guarded("clipboard_get", "read", async () => {
-    // the clipboard has no window; treat it as belonging to the app that currently has focus
-    const fg = await foreground().catch(() => undefined);
-    return fg;
+    // the clipboard has no window; treat it as belonging to the app that currently has focus, and refuse if that is unknown
+    try { return await foreground(); } catch { throw new Denied("Clipboard read refused: the foreground window cannot be identified (secure desktop or helper error)."); }
   }, async () => {
     const r = await helper.call<{ text: string; hasText: boolean }>("clipboard_get");
     return text(r.hasText ? r.text : "(clipboard has no text)");

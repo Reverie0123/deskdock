@@ -10,6 +10,9 @@ const PNG_1x1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPh
 const rl = createInterface({ input: process.stdin });
 rl.on("line", (line) => {
   let req; try { req = JSON.parse(line); } catch { process.stdout.write(JSON.stringify({ id: null, ok: false, error: "parse error" }) + "\n"); return; }
+  // the real helper (nlohmann/json) rejects lone surrogates in strings with a parse error and no request id
+  const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+  if (lone.test(JSON.stringify(req).replace(/\\u[0-9a-fA-F]{4}/g, (m) => String.fromCharCode(parseInt(m.slice(2), 16))))) { process.stdout.write(JSON.stringify({ id: null, ok: false, error: "parse error: lone surrogate" }) + "\n"); return; }
   const reply = (result) => process.stdout.write(JSON.stringify({ id: req.id, ok: true, result }) + "\n");
   const err = (error) => process.stdout.write(JSON.stringify({ id: req.id, ok: false, error }) + "\n");
   const a = req.args ?? {};
@@ -24,8 +27,8 @@ rl.on("line", (line) => {
     case "screenshot": return reply({ png_base64: PNG_1x1, width: 1, height: 1, origin: { x: 0, y: 0 }, scale: a.scale ?? 1 });
     case "uia_snapshot": return reply({ window: WINDOWS[1], nodes: [{ ref: 1, depth: 0, type: "document", name: "Text editor", rect: rect(100, 150, 600, 300) }], truncated: false });
     case "ref_window": return reply(WINDOWS[1]);
-    case "ref_node": return reply({ window: WINDOWS[1], node: { ref: a.ref, depth: 0, type: "document", name: "Text editor", rect: rect(100, 150, 600, 300) } });
-    case "uia_find": return reply({ window: WINDOWS[1], node: { ref: 77, depth: 0, type: a.type || "document", name: a.name || "Text editor", rect: rect(100, 150, 600, 300) } });
+    case "ref_node": return a.ref === 1 ? reply({ window: WINDOWS[1], node: { ref: 1, depth: 0, type: "document", name: "Text editor", rect: rect(100, 150, 600, 300) } }) : err("unknown ref (take a new snapshot)");
+    case "uia_find": return (a.type === "document" && a.name === "Text editor") ? reply({ window: WINDOWS[1], node: { ref: 77, depth: 0, type: "document", name: "Text editor", rect: rect(100, 150, 600, 300) } }) : err("no control matched");
     case "uia_click": return reply({ action: "invoke", rect: rect(0, 0, 1, 1) });
     case "focus_window": return reply({ focused: true, window: WINDOWS.find((w) => w.hwnd === a.hwnd) ?? WINDOWS[1] });
     case "clipboard_get": return reply({ text: "clip", hasText: true });

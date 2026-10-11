@@ -79,7 +79,7 @@ The policy lives at `%APPDATA%\deskdock\policy.json` (run `deskdock policy` to p
 | `click` | yes | yes | no |
 | `full` | yes | yes | yes |
 
-Keys are lower-case process names, or `title:` followed by a substring of the window title. When several rules match (a process rule and a `title:` rule), the strictest one wins; otherwise `default` applies. Windows whose process cannot be identified are capped at `read`. When a tool is denied, the model receives the reason and the file path, and is told to ask you to do that step yourself.
+Keys are lower-case process names, `title:` followed by a substring of the window title, or `title=` followed by the exact title (used for the Win+R Run box). When several rules match (a process rule and a `title:` rule), the strictest one wins; otherwise `default` applies. Windows whose process cannot be identified are capped at `read`. When a tool is denied, the model receives the reason and the file path, and is told to ask you to do that step yourself.
 
 Note that `read` still lets the model see what is on screen in that app, including a browser's address bar. Use `block` for anything it should not even look at.
 

@@ -41,7 +41,8 @@ export class Ocr {
     const p = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath()], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
     this.proc = p;
     p.stderr.on("data", (d) => process.stderr.write(`[deskdock-ocr] ${d}`));
-    p.on("error", () => { /* handled through the exit path below */ });
+    let onSpawnError: (e: Error) => void = () => undefined;
+    p.on("error", (e) => onSpawnError(e));
     p.stdin.on("error", () => { /* a dead worker is replaced on the next call */ });
     this.ready = new Promise<string[]>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -49,6 +50,7 @@ export class Ocr {
         try { p.kill(); } catch { /* ignore */ }
         if (this.proc === p) { this.proc = null; this.ready = null; }
       }, 20000);
+      onSpawnError = (e) => { clearTimeout(timer); reject(new OcrError(`OCR worker could not start: ${e.message}`)); if (this.proc === p) { this.proc = null; this.ready = null; } };
       const rl = createInterface({ input: p.stdout });
       rl.on("line", (line) => {
         let msg: { ready?: boolean; languages?: string[]; id?: number; ok?: boolean; error?: string } & Partial<OcrResult>;

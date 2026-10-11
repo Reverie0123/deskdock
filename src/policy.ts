@@ -10,7 +10,7 @@ export interface Policy {
   version: 1;
   /** Level used when no rule matches. */
   default: Level;
-  /** Keys are lower-case process names (e.g. "msedge.exe") or window-title substrings prefixed with "title:". */
+  /** Keys are lower-case process names (e.g. "msedge.exe"), window-title substrings prefixed with "title:", or exact titles prefixed with "title=". */
   rules: Record<string, Level>;
 }
 
@@ -27,8 +27,8 @@ export const DEFAULT_POLICY: Policy = {
     "1password.exe": "block", "bitwarden.exe": "block", "keepass.exe": "block", "keepassxc.exe": "block",
     "alipay.exe": "block", "alipaysecsvc.exe": "block", "wechatpay.exe": "block",
     "title:网上银行": "block", "title:online banking": "block", "title:密码管理": "block",
-    // the Win+R Run box lives in explorer.exe: let the model see it but not type a command into it
-    "title:运行": "click",
+    // the Win+R Run box lives in explorer.exe: let the model see it but not type a command into it (exact title)
+    "title=运行": "click", "title=run": "click",
     // ourselves and the OS security surface
     "logonui.exe": "block", "consent.exe": "block", "credentialuihost.exe": "block",
   },
@@ -62,8 +62,14 @@ export class PolicyStore {
       if (st.mtimeMs !== this.mtime) {
         const raw = JSON.parse(readFileSync(this.filePath, "utf8")) as Partial<Policy>;
         const rules: Record<string, Level> = {};
-        for (const [k, v] of Object.entries(raw.rules ?? {})) if (LEVELS.includes(v as Level)) rules[k.trim().toLowerCase()] = v as Level;
-        this.cached = { version: 1, default: LEVELS.includes(raw.default as Level) ? (raw.default as Level) : "full", rules };
+        for (const [k, v] of Object.entries(raw.rules ?? {})) {
+          if (LEVELS.includes(v as Level)) rules[k.trim().toLowerCase()] = v as Level;
+          else { rules[k.trim().toLowerCase()] = "block"; process.stderr.write(`[deskdock] policy: unknown level "${String(v)}" for ${k}; treating as block\n`); }
+        }
+        let def: Level = "full";
+        if (LEVELS.includes(raw.default as Level)) def = raw.default as Level;
+        else if (raw.default !== undefined) { def = "read"; process.stderr.write(`[deskdock] policy: unknown default level "${String(raw.default)}"; using read\n`); }
+        this.cached = { version: 1, default: def, rules };
         this.mtime = st.mtimeMs;
       }
     } catch {
@@ -82,7 +88,9 @@ export class PolicyStore {
     const t = title.toLowerCase();
     let level: Level | undefined = proc ? p.rules[proc] : undefined;
     for (const [k, v] of Object.entries(p.rules)) {
-      if (k.startsWith("title:") && k.length > 6 && t.includes(k.slice(6))) level = level === undefined ? v : strictest(level, v);
+      const hit = (k.startsWith("title:") && k.length > 6 && t.includes(k.slice(6)))   // substring
+               || (k.startsWith("title=") && k.length > 6 && t === k.slice(6));         // exact title
+      if (hit) level = level === undefined ? v : strictest(level, v);
     }
     if (level === undefined) level = p.default;
     if (!proc) level = strictest(level, "read");

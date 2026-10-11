@@ -37,11 +37,12 @@ export class Helper {
   private nextId = 1;
   private queue: Promise<unknown> = Promise.resolve();
 
-  constructor(private exe: string = helperPath()) {}
+  /** `args` exists so tests can substitute `node fake-helper.mjs` for the real executable. */
+  constructor(private exe: string = helperPath(), private args: string[] = []) {}
 
   private ensure(): ChildProcessWithoutNullStreams {
     if (this.proc && this.proc.exitCode === null) return this.proc;
-    const p = spawn(this.exe, [], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+    const p = spawn(this.exe, this.args, { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
     p.stderr.on("data", (d) => process.stderr.write(`[deskdock-helper] ${d}`));
     const rl = createInterface({ input: p.stdout });
     rl.on("line", (line) => {
@@ -54,6 +55,7 @@ export class Helper {
       msg.ok ? pend.resolve(msg.result) : pend.reject(new HelperError(msg.error ?? "unknown helper error"));
     });
     p.on("exit", (code) => {
+      if (this.proc !== p) return; // an already-replaced (killed) helper: its pending calls were rejected on timeout
       for (const [, pend] of this.pending) { clearTimeout(pend.timer); pend.reject(new HelperError(`helper exited with code ${code}`)); }
       this.pending.clear();
       this.proc = null;
@@ -70,7 +72,9 @@ export class Helper {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new HelperError(`${op} timed out after ${timeoutMs} ms`));
-        // A hung helper (usually a UIA call stuck inside an app) is restarted so the next call works.
+        // A hung helper (usually a UIA call stuck inside an app) is discarded immediately so the next call
+        // spawns a fresh one, then killed; its exit must not touch the replacement.
+        if (this.proc === p) this.proc = null;
         try { p.kill(); } catch { /* ignore */ }
       }, timeoutMs);
       this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer });

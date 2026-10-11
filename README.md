@@ -87,7 +87,7 @@ Every tool call is appended to `%APPDATA%\deskdock\logs\YYYY-MM-DD.jsonl`: time,
 
 ## Apps without a UI tree
 
-Most native, WinUI, Office and Chromium apps expose a full tree. Some Electron apps ship with accessibility turned off, and games and custom-drawn UIs have no tree at all; `read_window` then returns only the title-bar buttons. For those, `read_screen_text` runs the OCR engine built into Windows 10/11 on a screenshot and returns each text line with its coordinates, so the model can still click on a label. Install the English OCR language pack (Settings → Time & language → Language → Add a language → English → Optional features → OCR) for better results on English UI text.
+Most native, WinUI, Office and Chromium apps expose a full tree. Electron apps build theirs only after an assistive-technology client shows up: DeskDock sends the signals Chromium looks for on every read, but the first `read_window` on such an app may still return only the title-bar buttons, with the full tree appearing on a retry a few seconds later. Games and custom-drawn UIs have no tree at all. For those cases, `read_screen_text` runs the OCR engine built into Windows 10/11 on a screenshot and returns each text line with its coordinates, so the model can still click on a label. Install the English OCR language pack (Settings → Time & language → Language → Add a language → English → Optional features → OCR) for better results on English UI text.
 
 ## Install
 

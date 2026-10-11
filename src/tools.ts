@@ -19,10 +19,15 @@ export function formatWindow(w: WindowInfo): string {
   return `hwnd=${w.hwnd} "${w.title}" [${w.process}] at (${w.rect.x},${w.rect.y}) ${w.rect.w}x${w.rect.h}${flags ? ` (${flags})` : ""}`;
 }
 
-export function formatSnapshot(s: Snapshot): string {
-  const lines = [`Window: ${formatWindow(s.window)}`, `Nodes: ${s.nodes.length}${s.truncated ? " (truncated; pass a larger maxNodes or interactiveOnly=true)" : ""}`];
-  for (const n of s.nodes) lines.push(formatNode(n));
-  if (s.nodes.length <= 3) lines.push("Few nodes: this app may not expose its UI tree (common for Electron and games). Use screenshot + click by coordinates instead.");
+export function formatSnapshot(s: Snapshot, includeOffscreen = false): string {
+  const shown = includeOffscreen ? s.nodes : s.nodes.filter((n) => !n.offscreen);
+  const hidden = s.nodes.length - shown.length;
+  const lines = [
+    `Window: ${formatWindow(s.window)}`,
+    `Nodes: ${shown.length}${hidden ? ` (+${hidden} off-screen hidden; scroll to reach them or pass includeOffscreen=true)` : ""}${s.truncated ? " (truncated; pass a larger maxNodes or interactiveOnly=true)" : ""}. Format: [ref] type "name" value=... @centerX,centerY (screen px; indent = depth)`,
+  ];
+  for (const n of shown) lines.push(formatNode(n));
+  if (s.nodes.length <= 3) lines.push("Few nodes: this app has not exposed its UI tree yet. Electron apps usually open it a little after the first read_window: retry in a few seconds, or use read_screen_text (OCR) or screenshot + click by coordinates now.");
   return lines.join("\n");
 }
 function formatNode(n: UiaNode): string {
@@ -33,8 +38,9 @@ function formatNode(n: UiaNode): string {
   if (n.checked) parts.push(`checked=${n.checked}`);
   if (n.enabled === false) parts.push("disabled");
   if (n.offscreen) parts.push("offscreen");
-  parts.push(`@(${n.rect.x},${n.rect.y} ${n.rect.w}x${n.rect.h})`);
-  return "  ".repeat(Math.min(n.depth, 12)) + parts.join(" ");
+  // centre point only: that is what click needs, and it halves the token cost of a big tree
+  parts.push(`@${n.rect.x + Math.round(n.rect.w / 2)},${n.rect.y + Math.round(n.rect.h / 2)}`);
+  return " ".repeat(Math.min(n.depth, 12)) + parts.join(" ");
 }
 
 export function registerTools(server: McpServer, deps: Deps): void {
@@ -153,11 +159,12 @@ export function registerTools(server: McpServer, deps: Deps): void {
       interactiveOnly: z.boolean().optional().describe("Only buttons, inputs, links, list items and text (default true)"),
       maxNodes: z.number().int().min(10).max(3000).optional().describe("Node budget (default 400)"),
       maxDepth: z.number().int().min(1).max(40).optional().describe("Tree depth limit (default 14)"),
+      includeOffscreen: z.boolean().optional().describe("Also list controls scrolled out of view (default false; they cannot be clicked until scrolled into view)"),
     },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, guarded("read_window", "read", async (a) => a.hwnd ? byHwnd(a.hwnd) : foreground(), async (a) => {
     const s = await helper.call<Snapshot>("uia_snapshot", { hwnd: a.hwnd ?? null, interactiveOnly: a.interactiveOnly ?? true, maxNodes: a.maxNodes ?? 400, maxDepth: a.maxDepth ?? 14 }, 8000);
-    return text(formatSnapshot(s));
+    return text(formatSnapshot(s, a.includeOffscreen ?? false));
   }));
 
   server.registerTool("read_screen_text", {

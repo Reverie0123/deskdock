@@ -9,6 +9,8 @@ using std::min; using std::max;
 #include <gdiplus.h>
 #include <uiautomation.h>
 #include <dwmapi.h>
+#include <oleacc.h>
+#include <servprov.h>
 #include <shlwapi.h>
 #include <io.h>
 #include <fcntl.h>
@@ -397,19 +399,60 @@ static void walk(IUIAutomation* ua, IUIAutomationTreeWalker* walker, IUIAutomati
     }
     if (child) child->Release();
 }
+// Chromium/Electron: the top-level HWND exposes only the browser chrome (Views). Web content lives under
+// child windows of class Chrome_RenderWidgetHostHWND, so those are read separately. Asking the MSAA root for
+// IAccessible2 is the signal screen readers send; some builds switch their tree on after seeing it.
+static const GUID IID_IAccessible2_ = {0xE89F726E,0xC4F4,0x4c19,{0xBB,0x19,0xB6,0x47,0xD7,0xFA,0x84,0x78}};
+static void knockChromium(HWND top) {
+    IAccessible* acc = nullptr;
+    if (SUCCEEDED(AccessibleObjectFromWindow(top, OBJID_CLIENT, IID_IAccessible, (void**)&acc)) && acc) {
+        IServiceProvider* sp = nullptr; acc->QueryInterface(IID_IServiceProvider, (void**)&sp);
+        if (sp) { IUnknown* ia2 = nullptr; sp->QueryService(IID_IAccessible2_, IID_IAccessible2_, (void**)&ia2); if (ia2) ia2->Release(); sp->Release(); }
+        acc->Release();
+    }
+    SendMessageTimeoutW(top, WM_GETOBJECT, 0, (LPARAM)1, SMTO_ABORTIFHUNG, 300, nullptr); // honeypot id used by Chromium's screen-reader detection
+}
+static std::vector<HWND> renderChildren(HWND top) {
+    std::vector<HWND> v;
+    EnumChildWindows(top, [](HWND c, LPARAM p) -> BOOL {
+        wchar_t cls[128] = L""; GetClassNameW(c, cls, 128);
+        if (wcsstr(cls, L"Chrome_RenderWidgetHostHWND")) ((std::vector<HWND>*)p)->push_back(c);
+        return TRUE;
+    }, (LPARAM)&v);
+    return v;
+}
+static bool isChromiumWindow(HWND top) {
+    wchar_t cls[128] = L""; GetClassNameW(top, cls, 128);
+    return wcsstr(cls, L"Chrome_WidgetWin") != nullptr;
+}
 static json uiaSnapshot(const json& a) {
     HWND h = hwndArg(a); if (!h) h = GetForegroundWindow();
     int maxDepth = a.value("maxDepth", 12), maxNodes = a.value("maxNodes", 400), timeoutMs = a.value("timeoutMs", 4000);
     bool interactiveOnly = a.value("interactiveOnly", false);
     return withTimeout([=]() {
-        ComPtrUA ua; IUIAutomationElement* root = nullptr;
-        if (FAILED(ua.p->ElementFromHandle(h, &root)) || !root) throw std::runtime_error("ElementFromHandle failed");
-        IUIAutomationTreeWalker* walker = nullptr; ua.p->get_ControlViewWalker(&walker);
+        ComPtrUA ua;
+        bool chromium = isChromiumWindow(h);
+        if (chromium) knockChromium(h);
         json nodes = json::array(); int budget = maxNodes;
         { std::lock_guard<std::mutex> lk(g_refMutex); g_refs.clear(); g_nextRef = 1; }
-        walk(ua.p, walker, root, 0, maxDepth, budget, nodes, h, interactiveOnly);
-        walker->Release(); root->Release();
-        return json{{"window", windowJson(h)}, {"nodes", nodes}, {"truncated", budget <= 0}};
+        IUIAutomationTreeWalker* walker = nullptr; ua.p->get_ControlViewWalker(&walker);
+        auto readRoot = [&](HWND root_hwnd, int startDepth) {
+            IUIAutomationElement* root = nullptr;
+            if (FAILED(ua.p->ElementFromHandle(root_hwnd, &root)) || !root) return;
+            walk(ua.p, walker, root, startDepth, maxDepth, budget, nodes, root_hwnd, interactiveOnly);
+            root->Release();
+        };
+        readRoot(h, 0);
+        int contentNodes = 0;
+        if (chromium) {
+            size_t before = nodes.size();
+            for (HWND rc : renderChildren(h)) { if (budget <= 0) break; readRoot(rc, 1); }
+            contentNodes = (int)(nodes.size() - before);
+        }
+        walker->Release();
+        json out = {{"window", windowJson(h)}, {"nodes", nodes}, {"truncated", budget <= 0}};
+        if (chromium) { out["chromium"] = true; out["contentNodes"] = contentNodes; }
+        return out;
     }, timeoutMs);
 }
 static IUIAutomationElement* findByRef(IUIAutomation* ua, int ref, RefEntry& entry) {

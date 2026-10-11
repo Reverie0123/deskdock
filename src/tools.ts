@@ -4,6 +4,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Helper, HelperError, type Screenshot, type Snapshot, type UiaNode, type WindowInfo } from "./helper.js";
 import { decide, PolicyStore, type Action } from "./policy.js";
 import { Audit, redactArgs } from "./audit.js";
+import { Ocr, toScreen, formatOcr } from "./ocr.js";
 
 type Content = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
 type Result = { content: Content[]; isError?: boolean };
@@ -11,7 +12,7 @@ type Result = { content: Content[]; isError?: boolean };
 const text = (t: string): Result => ({ content: [{ type: "text", text: t }] });
 const fail = (t: string): Result => ({ content: [{ type: "text", text: t }], isError: true });
 
-export interface Deps { helper: Helper; policy: PolicyStore; audit: Audit }
+export interface Deps { helper: Helper; policy: PolicyStore; audit: Audit; ocr: Ocr }
 
 export function formatWindow(w: WindowInfo): string {
   const flags = [w.focused ? "focused" : "", w.minimized ? "minimized" : ""].filter(Boolean).join(", ");
@@ -36,7 +37,7 @@ function formatNode(n: UiaNode): string {
 }
 
 export function registerTools(server: McpServer, deps: Deps): void {
-  const { helper, policy, audit } = deps;
+  const { helper, policy, audit, ocr } = deps;
 
   async function targetAt(x: number, y: number): Promise<WindowInfo> { return helper.call<WindowInfo>("window_at", { x, y }); }
   async function foreground(): Promise<WindowInfo> { return helper.call<WindowInfo>("foreground_window"); }
@@ -46,6 +47,17 @@ export function registerTools(server: McpServer, deps: Deps): void {
     const w = wins.find((v) => v.hwnd === hwnd);
     if (!w) throw new HelperError(`window hwnd=${hwnd} not found; call list_windows again`);
     return w;
+  }
+
+  async function capture(hwnd: number | undefined, maxEdge: number): Promise<Screenshot> {
+    let scale = 1;
+    if (hwnd) {
+      const w = await byHwnd(hwnd); scale = Math.min(1, maxEdge / Math.max(w.rect.w, w.rect.h));
+    } else {
+      const info = await helper.call<{ virtual: { w: number; h: number } }>("screen_info");
+      scale = Math.min(1, maxEdge / Math.max(info.virtual.w, info.virtual.h));
+    }
+    return helper.call<Screenshot>("screenshot", { hwnd: hwnd ?? null, scale });
   }
 
   /** Wraps a tool body with policy check + audit log. `target` resolves which window the action touches. */
@@ -113,15 +125,7 @@ export function registerTools(server: McpServer, deps: Deps): void {
     },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, guarded("screenshot", "read", async (a) => a.hwnd ? byHwnd(a.hwnd) : undefined, async (a) => {
-    const maxEdge = a.maxEdge ?? 1280;
-    let scale = 1;
-    if (a.hwnd) {
-      const w = await byHwnd(a.hwnd); scale = Math.min(1, maxEdge / Math.max(w.rect.w, w.rect.h));
-    } else {
-      const info = await helper.call<{ virtual: { w: number; h: number } }>("screen_info");
-      scale = Math.min(1, maxEdge / Math.max(info.virtual.w, info.virtual.h));
-    }
-    const s = await helper.call<Screenshot>("screenshot", { hwnd: a.hwnd ?? null, scale });
+    const s = await capture(a.hwnd, a.maxEdge ?? 1280);
     return {
       content: [
         { type: "text", text: `${s.width}x${s.height} png, scale=${s.scale.toFixed(3)}, origin=(${s.origin.x},${s.origin.y}). Screen coordinate = image_pixel / ${s.scale.toFixed(3)} + origin.` },
@@ -143,6 +147,23 @@ export function registerTools(server: McpServer, deps: Deps): void {
   }, guarded("read_window", "read", async (a) => a.hwnd ? byHwnd(a.hwnd) : foreground(), async (a) => {
     const s = await helper.call<Snapshot>("uia_snapshot", { hwnd: a.hwnd ?? null, interactiveOnly: a.interactiveOnly ?? true, maxNodes: a.maxNodes ?? 400, maxDepth: a.maxDepth ?? 14 }, 8000);
     return text(formatSnapshot(s));
+  }));
+
+  server.registerTool("read_screen_text", {
+    title: "Read screen text (OCR)",
+    description: "Fallback for apps whose UI tree is empty (Electron apps with accessibility off, games, custom-drawn UIs): screenshot the screen or one window and run the built-in Windows OCR. Returns each text line with its screen rect and center, so you can click(x, y) on a label. Slower and less exact than read_window; use read_window first. 读不到控件树时用 OCR 把屏幕文字和坐标读出来。",
+    inputSchema: {
+      hwnd: z.number().int().optional().describe("Window to read; omit for the full screen"),
+      maxEdge: z.number().int().min(400).max(4000).optional().describe("Capture resolution cap, long edge in px (default 4000 = native resolution; lower only to speed up)"),
+      lang: z.string().optional().describe("OCR language tag such as zh-Hans-CN or en-US; default is the system profile language"),
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  }, guarded("read_screen_text", "read", async (a) => a.hwnd ? byHwnd(a.hwnd) : undefined, async (a, win) => {
+    const s = await capture(a.hwnd, a.maxEdge ?? 4000);
+    const r = await ocr.recognizePng(Buffer.from(s.png_base64, "base64"), a.lang);
+    const lines = toScreen(r.lines, s.scale, s.origin);
+    const header = `${win ? formatWindow(win) : "Full screen"}; OCR ${r.lang} in ${r.ms} ms; coordinates are screen pixels.`;
+    return text(formatOcr(lines, header));
   }));
 
   server.registerTool("click", {

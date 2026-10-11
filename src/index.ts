@@ -6,39 +6,81 @@ import { Helper } from "./helper.js";
 import { PolicyStore, policyPath } from "./policy.js";
 import { Audit } from "./audit.js";
 import { registerTools } from "./tools.js";
+import { Ocr } from "./ocr.js";
+import { runSetup, formatResults } from "./setup.js";
 
 const VERSION = "0.1.0";
 
-export function createServer(deps?: { helper?: Helper; policy?: PolicyStore; audit?: Audit }): { server: McpServer; helper: Helper } {
+export function createServer(deps?: { helper?: Helper; policy?: PolicyStore; audit?: Audit; ocr?: Ocr }): { server: McpServer; helper: Helper; ocr: Ocr } {
   const helper = deps?.helper ?? new Helper();
   const policy = deps?.policy ?? new PolicyStore();
   const audit = deps?.audit ?? new Audit();
+  const ocr = deps?.ocr ?? new Ocr();
   const server = new McpServer(
     { name: "deskdock", version: VERSION },
     {
       instructions: [
         "DeskDock lets you operate Windows desktop apps.",
-        "Workflow: list_windows -> focus_window -> read_window (preferred) or screenshot -> click / type / key -> read_window again to verify.",
+        "Workflow: list_windows -> focus_window -> read_window (preferred) -> click / type / key -> read_window again to verify. If read_window returns almost nothing, use read_screen_text (OCR) or screenshot and click by coordinates.",
         "Refs from read_window expire on the next read_window. Coordinates are physical screen pixels.",
         `Some apps are read-only or blocked by the user's policy (${policyPath()}); when a tool is denied, tell the user plainly and ask them to do that step.`,
         "Never type passwords or payment details; ask the user to enter those themselves.",
       ].join(" "),
     },
   );
-  registerTools(server, { helper, policy, audit });
-  return { server, helper };
+  registerTools(server, { helper, policy, audit, ocr });
+  return { server, helper, ocr };
+}
+
+function uiLang(): "zh" | "en" {
+  const l = (process.env.DESKDOCK_LANG ?? process.env.LANG ?? process.env.LC_ALL ?? Intl.DateTimeFormat().resolvedOptions().locale ?? "").toLowerCase();
+  return l.startsWith("zh") ? "zh" : "en";
+}
+
+function usage(lang: "zh" | "en"): string {
+  return lang === "zh"
+    ? `DeskDock ${VERSION} 桌面扩展坞：让 AI 安全地操作任意 Windows 程序。
+
+用法:
+  deskdock              作为 MCP 服务运行（由 AI 客户端启动，stdio）
+  deskdock setup        把 DeskDock 写进本机已安装的 AI 客户端配置（Claude Code / Claude 桌面应用 / Cursor / Cline / Windsurf）
+  deskdock setup --remove   从上述配置中移除
+  deskdock setup --dry-run  只显示将要做的改动，不写文件
+  deskdock policy       显示权限表文件位置
+  deskdock --help`
+    : `DeskDock ${VERSION}: let Claude, Cursor or any model safely operate any Windows app.
+
+Usage:
+  deskdock              run as an MCP server (started by the AI client over stdio)
+  deskdock setup        add DeskDock to every installed AI client (Claude Code / Claude Desktop / Cursor / Cline / Windsurf)
+  deskdock setup --remove   remove it again
+  deskdock setup --dry-run  show what would change without writing
+  deskdock policy       print the policy file location
+  deskdock --help`;
 }
 
 async function main(): Promise<void> {
+  const lang = uiLang();
+  const argv = process.argv.slice(2);
+  const cmd = argv[0];
+  if (cmd === "--help" || cmd === "-h" || cmd === "help") { process.stdout.write(usage(lang) + "\n"); return; }
+  if (cmd === "--version" || cmd === "-v") { process.stdout.write(VERSION + "\n"); return; }
   if (process.platform !== "win32") {
-    process.stderr.write("DeskDock only runs on Windows.\n");
+    process.stderr.write(lang === "zh" ? "DeskDock 只能在 Windows 上运行。\n" : "DeskDock only runs on Windows.\n");
     process.exit(1);
   }
+  if (cmd === "policy") { new PolicyStore().ensureFile(); process.stdout.write(policyPath() + "\n"); return; }
+  if (cmd === "setup") {
+    const results = runSetup({ remove: argv.includes("--remove"), dryRun: argv.includes("--dry-run"), lang });
+    process.stdout.write(formatResults(results, lang) + "\n");
+    return;
+  }
+  if (cmd) { process.stderr.write((lang === "zh" ? "未知命令: " : "unknown command: ") + cmd + "\n\n" + usage(lang) + "\n"); process.exit(2); }
   const policy = new PolicyStore();
   policy.ensureFile();
-  const { server, helper } = createServer({ policy });
+  const { server, helper, ocr } = createServer({ policy });
   const transport = new StdioServerTransport();
-  const shutdown = () => { helper.close(); process.exit(0); };
+  const shutdown = () => { helper.close(); ocr.close(); process.exit(0); };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
   process.stdin.on("close", shutdown);

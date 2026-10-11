@@ -26,7 +26,8 @@
     "build:helper": "g++ -O2 -std=c++17 -static -s -Wall -Wno-misleading-indentation -o resources/deskdock-helper.exe native/helper/helper.cpp -lole32 -loleaut32 -luuid -lgdiplus -lgdi32 -luser32 -ldwmapi -loleacc -lshlwapi",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test --test-concurrency=1 tests/*.test.mjs",
+    "test:e2e": "node tests/e2e/notepad.e2e.mjs"
   },
   "keywords": [
     "mcp",

@@ -63,7 +63,7 @@ static void openPanel() {
 }
 static void updateTip() {
     std::wstring tip = isPaused() ? (g_zh ? L"DeskDock（已暂停）" : L"DeskDock (paused)") : (g_zh ? L"DeskDock 桌面扩展坞" : L"DeskDock");
-    wcsncpy(g_nid.szTip, tip.c_str(), 127); g_nid.uFlags = NIF_TIP | NIF_ICON | NIF_MESSAGE;
+    wcsncpy(g_nid.szTip, tip.c_str(), 127); g_nid.uFlags = NIF_TIP | NIF_SHOWTIP | NIF_ICON | NIF_MESSAGE;
     g_nid.hIcon = LoadIconW(nullptr, isPaused() ? IDI_WARNING : IDI_APPLICATION);
     Shell_NotifyIconW(NIM_MODIFY, &g_nid);
 }
@@ -81,10 +81,13 @@ static void showMenu(HWND hwnd) {
 }
 static LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
-    case WM_TRAY:
-        if (lp == WM_RBUTTONUP || lp == WM_CONTEXTMENU) showMenu(hwnd);
-        else if (lp == WM_LBUTTONDBLCLK) openPanel();
+    case WM_TRAY: {
+        // NOTIFYICON_VERSION_4: the event is in the low word of lParam, the icon id in the high word
+        UINT ev = LOWORD(lp);
+        if (ev == WM_RBUTTONUP || ev == WM_CONTEXTMENU) showMenu(hwnd);
+        else if (ev == WM_LBUTTONDBLCLK || ev == NIN_KEYSELECT) openPanel();
         return 0;
+    }
     case WM_COMMAND:
         switch (LOWORD(wp)) {
         case ID_OPEN: openPanel(); break;
@@ -106,7 +109,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     WNDCLASSW wc{}; wc.lpfnWndProc = wndProc; wc.hInstance = hInst; wc.lpszClassName = L"DeskDockTray"; RegisterClassW(&wc);
     HWND hwnd = CreateWindowW(wc.lpszClassName, L"DeskDock", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, hInst, nullptr);
     g_nid.cbSize = sizeof g_nid; g_nid.hWnd = hwnd; g_nid.uID = 1; g_nid.uCallbackMessage = WM_TRAY; g_nid.uVersion = NOTIFYICON_VERSION_4;
-    g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP; g_nid.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_SHOWTIP; g_nid.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    wcsncpy(g_nid.szTip, g_zh ? L"DeskDock 桌面扩展坞" : L"DeskDock", 127); // the tip doubles as the accessible name of the icon
     Shell_NotifyIconW(NIM_ADD, &g_nid); Shell_NotifyIconW(NIM_SETVERSION, &g_nid); updateTip();
     MSG m; while (GetMessageW(&m, nullptr, 0, 0) > 0) { TranslateMessage(&m); DispatchMessageW(&m); }
     ReleaseMutex(mutex); CloseHandle(mutex);

@@ -109,9 +109,13 @@ static json listWindows(const json&) {
     json out = json::array();
     EnumWindows([](HWND h, LPARAM p) -> BOOL {
         if (!IsWindowVisible(h) || isCloaked(h)) return TRUE;
-        if (GetWindowTextLengthW(h) == 0) return TRUE;
+        wchar_t cls[128] = L""; GetClassNameW(h, cls, 128);
+        // Title-less system surfaces the model still needs: taskbar, tray overflow, context menus, popups.
+        static const wchar_t* keep[] = { L"Shell_TrayWnd", L"Shell_SecondaryTrayWnd", L"NotifyIconOverflowWindow", L"TopLevelWindowForOverflowXamlIsland", L"#32768", L"Xaml_WindowedPopupClass", L"Windows.UI.Core.CoreWindow" };
+        bool whitelisted = false; for (auto k : keep) if (wcscmp(cls, k) == 0) whitelisted = true;
+        if (GetWindowTextLengthW(h) == 0 && !whitelisted) return TRUE;
         LONG ex = GetWindowLongW(h, GWL_EXSTYLE);
-        if (ex & WS_EX_TOOLWINDOW) return TRUE;
+        if ((ex & WS_EX_TOOLWINDOW) && !whitelisted) return TRUE;
         ((json*)p)->push_back(windowJson(h));
         return TRUE;
     }, (LPARAM)&out);

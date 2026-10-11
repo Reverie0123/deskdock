@@ -14,9 +14,14 @@ const fail = (t: string): Result => ({ content: [{ type: "text", text: t }], isE
 
 export interface Deps { helper: Helper; policy: PolicyStore; audit: Audit; ocr: Ocr }
 
+const CLASS_LABELS: Record<string, string> = {
+  Shell_TrayWnd: "Taskbar", Shell_SecondaryTrayWnd: "Taskbar (secondary monitor)", NotifyIconOverflowWindow: "Tray overflow",
+  TopLevelWindowForOverflowXamlIsland: "Tray overflow", "#32768": "Context menu", Xaml_WindowedPopupClass: "Popup",
+};
 export function formatWindow(w: WindowInfo): string {
   const flags = [w.focused ? "focused" : "", w.minimized ? "minimized" : ""].filter(Boolean).join(", ");
-  return `hwnd=${w.hwnd} "${w.title}" [${w.process}] at (${w.rect.x},${w.rect.y}) ${w.rect.w}x${w.rect.h}${flags ? ` (${flags})` : ""}`;
+  const title = w.title || CLASS_LABELS[w.class] || w.class;
+  return `hwnd=${w.hwnd} "${title}" [${w.process}] at (${w.rect.x},${w.rect.y}) ${w.rect.w}x${w.rect.h}${flags ? ` (${flags})` : ""}`;
 }
 
 export function formatSnapshot(s: Snapshot, includeOffscreen = false): string {

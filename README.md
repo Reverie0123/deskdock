@@ -81,6 +81,12 @@ Keys are lower-case process names, or `title:` followed by a substring of the wi
 
 Note that `read` still lets the model see what is on screen in that app, including a browser's address bar. Use `block` for anything it should not even look at.
 
+## Control panel and tray
+
+`deskdock panel` opens a local page (127.0.0.1 only) where you edit the permission table, browse the audit log by day, filter by tool or outcome, and replay a session step by step on a timeline. The MCP server also starts the panel in the background whenever a client launches it.
+
+`resources/deskdock-tray.exe` puts an icon in the notification area: open the panel, open the log folder, exit, and **Pause DeskDock**. While paused, every tool call is refused with a message telling the model to ask you to resume. Pause state is a marker file in `%APPDATA%\deskdock`, so it works even when the panel is not open.
+
 ## Audit log
 
 Every tool call is appended to `%APPDATA%\deskdock\logs\YYYY-MM-DD.jsonl`: time, tool, arguments, the target window and process, outcome (ok / denied / error) and duration. Typed text is logged as a character count, never as content. Screenshots are not stored.

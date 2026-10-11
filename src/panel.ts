@@ -5,6 +5,7 @@ import { existsSync, readFileSync, writeFileSync, readdirSync, mkdirSync } from 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PolicyStore, policyDir, DEFAULT_POLICY, type Policy, type Level } from "./policy.js";
+import { MacroStore, MACRO_NAME } from "./macros.js";
 
 const LEVELS: Level[] = ["block", "read", "click", "full"];
 
@@ -48,9 +49,10 @@ function validatePolicy(raw: unknown): Policy {
 
 export interface PanelHandle { port: number; url: string; close: () => void }
 
-export function startPanel(opts: { policy: PolicyStore; port?: number; version: string; logsDir?: string; writeInfo?: boolean }): Promise<PanelHandle> {
+export function startPanel(opts: { policy: PolicyStore; port?: number; version: string; logsDir?: string; writeInfo?: boolean; macros?: MacroStore }): Promise<PanelHandle> {
   const html = readFileSync(panelHtmlPath(), "utf8");
   const logs = opts.logsDir ?? defaultLogsDir();
+  const macros = opts.macros ?? new MacroStore();
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
     const send = (code: number, body: string, type = "application/json; charset=utf-8") => { res.writeHead(code, { "content-type": type, "cache-control": "no-store" }); res.end(body); };
@@ -81,6 +83,13 @@ export function startPanel(opts: { policy: PolicyStore; port?: number; version: 
         const date = url.searchParams.get("date");
         if (!date) return json(200, { dates: listLogDates(logs) });
         return json(200, { date, entries: readLog(date, logs) });
+      }
+      if (req.method === "GET" && url.pathname === "/api/macros") return json(200, { macros: macros.list() });
+      if (req.method === "DELETE" && url.pathname === "/api/macros") {
+        if (req.headers["x-deskdock"] !== "panel") return json(403, { error: "missing X-DeskDock header" });
+        const name = url.searchParams.get("name") ?? "";
+        if (!MACRO_NAME.test(name)) return json(400, { error: "bad macro name" });
+        return json(macros.delete(name) ? 200 : 404, { deleted: name });
       }
       json(404, { error: "not found" });
     } catch (e) { json(500, { error: (e as Error).message }); }

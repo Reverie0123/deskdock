@@ -87,6 +87,18 @@ Note that `read` still lets the model see what is on screen in that app, includi
 
 `resources/deskdock-tray.exe` puts an icon in the notification area: open the panel, open the log folder, exit, and **Pause DeskDock**. While paused, every tool call is refused with a message telling the model to ask you to resume. Pause state is a marker file in `%APPDATA%\deskdock`, so it works even when the panel is not open.
 
+## Macros
+
+A task you repeat can be saved as a macro and comes back as a tool of its own:
+
+```
+save_macro(name="wechat_send", description="Send a WeChat message", fromLast=4,
+           params=[{name:"who"},{name:"text"}], replace={"小王":"who","今晚八点开会":"text"})
+→ new tool macro_wechat_send(who, text)
+```
+
+`fromLast=N` takes the last N successful actions of the session. Steps that clicked a `[ref]` are stored as a stable description (process, control name, type, automationId) and re-resolved at run time, so a macro keeps working after windows move or reopen. `{{param}}` placeholders become the tool's parameters. Every replayed step goes through the same permission table and audit log; macros cannot call other macros. Files live in `%APPDATA%\deskdock\macros`.
+
 ## Audit log
 
 Every tool call is appended to `%APPDATA%\deskdock\logs\YYYY-MM-DD.jsonl`: time, tool, arguments, the target window and process, outcome (ok / denied / error) and duration. Typed text is logged as a character count, never as content. Screenshots are not stored.

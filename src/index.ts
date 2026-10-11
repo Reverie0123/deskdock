@@ -78,7 +78,7 @@ async function main(): Promise<void> {
   if (cmd === "panel") {
     const policy = new PolicyStore(); policy.ensureFile();
     const portArg = argv.indexOf("--port");
-    const panel = await startPanel({ policy, version: VERSION, port: portArg >= 0 ? Number(argv[portArg + 1]) : undefined });
+    const panel = await startPanel({ policy, version: VERSION, port: portArg >= 0 ? Number(argv[portArg + 1]) : undefined, macros: new MacroStore() });
     process.stdout.write((lang === "zh" ? "控制面板: " : "Control panel: ") + panel.url + (lang === "zh" ? "  （Ctrl+C 退出）\n" : "  (Ctrl+C to stop)\n"));
     if (!argv.includes("--no-open")) spawn("cmd.exe", ["/c", "start", "", panel.url], { detached: true, stdio: "ignore" }).unref();
     await new Promise(() => { /* run until killed */ });
@@ -92,7 +92,8 @@ async function main(): Promise<void> {
   if (cmd) { process.stderr.write((lang === "zh" ? "未知命令: " : "unknown command: ") + cmd + "\n\n" + usage(lang) + "\n"); process.exit(2); }
   const policy = new PolicyStore();
   policy.ensureFile();
-  const { server, helper, ocr } = createServer({ policy });
+  const macros = new MacroStore();
+  const { server, helper, ocr } = createServer({ policy, macros });
   const transport = new StdioServerTransport();
   const shutdown = () => { helper.close(); ocr.close(); process.exit(0); };
   process.on("SIGINT", shutdown);
@@ -100,7 +101,7 @@ async function main(): Promise<void> {
   process.stdin.on("close", shutdown);
   await server.connect(transport);
   let panelUrl = "";
-  try { const panel = await startPanel({ policy, version: VERSION }); panelUrl = panel.url; } catch (e) { process.stderr.write(`DeskDock: control panel not started: ${(e as Error).message}\n`); }
+  try { const panel = await startPanel({ policy, version: VERSION, macros }); panelUrl = panel.url; } catch (e) { process.stderr.write(`DeskDock: control panel not started: ${(e as Error).message}\n`); }
   process.stderr.write(`DeskDock ${VERSION} ready (policy: ${policyPath()}${panelUrl ? `, panel: ${panelUrl}` : ""})\n`);
 }
 

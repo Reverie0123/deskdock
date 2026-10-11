@@ -43,6 +43,7 @@
     <button data-tab="status" class="active" data-i18n="tab.status">状态</button>
     <button data-tab="policy" data-i18n="tab.policy">权限</button>
     <button data-tab="logs" data-i18n="tab.logs">日志</button>
+    <button data-tab="macros" data-i18n="tab.macros">宏</button>
   </nav>
   <div class="spacer"></div>
   <button class="btn" id="lang">EN</button>
@@ -109,6 +110,13 @@
       <div id="steps" style="margin-top: 10px"></div>
     </div>
   </section>
+  <section id="macros">
+    <div class="card">
+      <p class="muted small" data-i18n="macros.hint">宏是录下来的一串操作，每个宏在 AI 客户端里都是一个独立的工具（macro_名字）。录制在对话里用 save_macro 完成；这里查看和删除。</p>
+      <div id="macroList"></div>
+      <p class="muted small" id="macroEmpty" data-i18n="macros.empty">还没有宏。</p>
+    </div>
+  </section>
 </main>
 <div id="toast"></div>
 <script>
@@ -117,12 +125,14 @@ const I18N = {
     "status.hint": "AI 客户端每次调用 DeskDock 的工具，都会先查权限表，再记一条日志。这个页面只在你的电脑上，只监听 127.0.0.1。",
     "policy.default": "默认级别", "policy.defaultHint": "没有匹配规则的程序用这个级别", "policy.reset": "恢复默认", "policy.save": "保存", "policy.app": "程序（进程名）或 title:标题片段", "policy.level": "级别", "policy.add": "添加",
     "policy.levels": "block 禁止一切；read 只能截图和读控件；click 加鼠标；full 加键盘输入。", "policy.seen": "最近日志里出现过、但还没有规则的程序", "policy.saved": "已保存，立即生效", "policy.remove": "删除",
-    "logs.date": "日期", "logs.outcome": "结果", "logs.tool": "工具", "logs.table": "表格", "logs.timeline": "时间线", "logs.reload": "刷新", "logs.time": "时间", "logs.toolCol": "工具", "logs.target": "目标", "logs.args": "参数", "logs.result": "结果", "logs.empty": "这一天没有记录。", "logs.play": "自动播放", "logs.pause": "暂停", "logs.step": "第 {i} / {n} 步" },
+    "logs.date": "日期", "logs.outcome": "结果", "logs.tool": "工具", "logs.table": "表格", "logs.timeline": "时间线", "logs.reload": "刷新", "logs.time": "时间", "logs.toolCol": "工具", "logs.target": "目标", "logs.args": "参数", "logs.result": "结果", "logs.empty": "这一天没有记录。", "logs.play": "自动播放", "logs.pause": "暂停", "logs.step": "第 {i} / {n} 步",
+    "tab.macros": "宏", "macros.hint": "宏是录下来的一串操作，每个宏在 AI 客户端里都是一个独立的工具（macro_名字）。录制在对话里用 save_macro 完成；这里查看和删除。", "macros.empty": "还没有宏。", "macros.params": "参数", "macros.steps": "步骤", "macros.delete": "删除", "macros.deleted": "已删除；AI 客户端重启后工具列表才会更新", "macros.confirm": "删除这个宏？" },
   en: { "tab.status": "Status", "tab.policy": "Permissions", "tab.logs": "Log", "status.calls": "Calls today", "status.denied": "Denied today", "status.policyFile": "Policy file", "status.logsDir": "Log folder",
     "status.hint": "Every tool call from an AI client is checked against the policy and then logged. This page lives on your machine only and listens on 127.0.0.1.",
     "policy.default": "Default level", "policy.defaultHint": "used when no rule matches", "policy.reset": "Reset to defaults", "policy.save": "Save", "policy.app": "App (process name) or title:substring", "policy.level": "Level", "policy.add": "Add",
     "policy.levels": "block: nothing; read: screenshot and read controls; click: plus mouse; full: plus keyboard.", "policy.seen": "Apps seen in recent logs without a rule", "policy.saved": "Saved, effective immediately", "policy.remove": "Remove",
-    "logs.date": "Date", "logs.outcome": "Outcome", "logs.tool": "Tool", "logs.table": "Table", "logs.timeline": "Timeline", "logs.reload": "Reload", "logs.time": "Time", "logs.toolCol": "Tool", "logs.target": "Target", "logs.args": "Arguments", "logs.result": "Outcome", "logs.empty": "No entries for this day.", "logs.play": "Auto-play", "logs.pause": "Pause", "logs.step": "Step {i} of {n}" },
+    "logs.date": "Date", "logs.outcome": "Outcome", "logs.tool": "Tool", "logs.table": "Table", "logs.timeline": "Timeline", "logs.reload": "Reload", "logs.time": "Time", "logs.toolCol": "Tool", "logs.target": "Target", "logs.args": "Arguments", "logs.result": "Outcome", "logs.empty": "No entries for this day.", "logs.play": "Auto-play", "logs.pause": "Pause", "logs.step": "Step {i} of {n}",
+    "tab.macros": "Macros", "macros.hint": "A macro is a recorded sequence of actions; each one is a separate tool (macro_name) in your AI client. Record with save_macro in the conversation; view and delete here.", "macros.empty": "No macros yet.", "macros.params": "Parameters", "macros.steps": "Steps", "macros.delete": "Delete", "macros.deleted": "Deleted; the tool list updates when the AI client restarts", "macros.confirm": "Delete this macro?" },
 };
 let lang = (localStorage.getItem("deskdock.lang") || (navigator.language.startsWith("zh") ? "zh" : "en"));
 const t = (k, v = {}) => (I18N[lang][k] || k).replace(/\{(\w+)\}/g, (_, n) => v[n]);
@@ -193,7 +203,22 @@ $("viewTable").onclick = () => { $("tableView").style.display = ""; $("timelineV
 $("viewTimeline").onclick = () => { $("tableView").style.display = "none"; $("timelineView").style.display = ""; renderTimeline(); };
 $("date").onchange = loadLogs; $("outcome").onchange = () => { renderTable(); renderTimeline(); }; $("tool").onchange = () => { renderTable(); renderTimeline(); }; $("reload").onclick = loadLogs;
 
-(async () => { applyLang(); await loadStatus(); await loadPolicy(); await loadDates(); await loadLogs(); })().catch((e) => toast(String(e.message)));
+async function loadMacros() {
+  const { macros } = await api("/api/macros");
+  const box = $("macroList"); box.innerHTML = ""; $("macroEmpty").style.display = macros.length ? "none" : "";
+  for (const m of macros) {
+    const d = document.createElement("div"); d.className = "card";
+    const params = m.params.map((p) => `<code>{{${p.name}}}</code>${p.description ? ` <span class="muted small">${p.description}</span>` : ""}`).join(", ") || "<span class=\"muted\">-</span>";
+    const steps = m.steps.map((st, i) => { const tgt = st.target ? ` <span class="muted">-> ${[st.target.process, st.target.type, st.target.name ? JSON.stringify(st.target.name) : ""].filter(Boolean).join(" ")}</span>` : ""; return `<li><code>${st.tool}</code> <code class="muted">${fmtArgs(st.args)}</code>${tgt}</li>`; }).join("");
+    d.innerHTML = `<div class="row"><strong>macro_${m.name}</strong><span class="muted small">${m.description || ""}</span><div class="spacer"></div><button class="btn small danger">${t("macros.delete")}</button></div>
+      <div class="small" style="margin-top:6px"><span class="muted">${t("macros.params")}:</span> ${params}</div>
+      <details class="small" style="margin-top:6px"><summary class="muted">${t("macros.steps")} (${m.steps.length})</summary><ol>${steps}</ol></details>`;
+    d.querySelector("button").onclick = async () => { if (!confirm(t("macros.confirm"))) return; await api("/api/macros?name=" + encodeURIComponent(m.name), { method: "DELETE", headers: { "x-deskdock": "panel" } }); toast(t("macros.deleted")); loadMacros(); };
+    box.appendChild(d);
+  }
+}
+document.querySelector("nav button[data-tab=macros]").addEventListener("click", loadMacros);
+(async () => { applyLang(); await loadStatus(); await loadPolicy(); await loadDates(); await loadLogs(); await loadMacros(); })().catch((e) => toast(String(e.message)));
 </script>
 </body>
 </html>

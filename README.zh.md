@@ -87,6 +87,18 @@ npx deskdock setup
 
 `resources/deskdock-tray.exe` 在通知区域放一个图标：打开面板、打开日志目录、退出，以及**暂停 DeskDock**。暂停期间所有工具调用都会被拒绝，并告诉模型去请你恢复。暂停状态是 `%APPDATA%\deskdock` 下的一个标记文件，面板没开也照样生效。
 
+## 宏
+
+经常重复的任务可以存成宏，宏自己会变成一个工具：
+
+```
+save_macro(name="wechat_send", description="发一条微信", fromLast=4,
+           params=[{name:"who"},{name:"text"}], replace={"小王":"who","今晚八点开会":"text"})
+→ 新工具 macro_wechat_send(who, text)
+```
+
+`fromLast=N` 取本次会话最近 N 步成功的操作。按 `[ref]` 点击的步骤存成稳定描述（进程、控件名、类型、自动化 ID），回放时重新定位，所以窗口挪了、重开了宏照样能用。`{{参数}}` 占位符就是这个工具的参数。回放的每一步照样过权限表和审计日志；宏不能调用别的宏。文件在 `%APPDATA%\deskdock\macros`。
+
 ## 审计日志
 
 每次工具调用都追加到 `%APPDATA%\deskdock\logs\年-月-日.jsonl`：时间、工具、参数、目标窗口和进程、结果（成功 / 拒绝 / 出错）、耗时。输入的文字只记字数不记内容，截图不保存。

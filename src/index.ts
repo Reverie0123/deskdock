@@ -7,6 +7,8 @@ import { PolicyStore, policyPath } from "./policy.js";
 import { Audit } from "./audit.js";
 import { registerTools } from "./tools.js";
 import { Ocr } from "./ocr.js";
+import { startPanel } from "./panel.js";
+import { spawn } from "node:child_process";
 import { runSetup, formatResults } from "./setup.js";
 
 const VERSION = "0.1.0";
@@ -70,6 +72,15 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   if (cmd === "policy") { new PolicyStore().ensureFile(); process.stdout.write(policyPath() + "\n"); return; }
+  if (cmd === "panel") {
+    const policy = new PolicyStore(); policy.ensureFile();
+    const portArg = argv.indexOf("--port");
+    const panel = await startPanel({ policy, version: VERSION, port: portArg >= 0 ? Number(argv[portArg + 1]) : undefined });
+    process.stdout.write((lang === "zh" ? "控制面板: " : "Control panel: ") + panel.url + (lang === "zh" ? "  （Ctrl+C 退出）\n" : "  (Ctrl+C to stop)\n"));
+    if (!argv.includes("--no-open")) spawn("cmd.exe", ["/c", "start", "", panel.url], { detached: true, stdio: "ignore" }).unref();
+    await new Promise(() => { /* run until killed */ });
+    return;
+  }
   if (cmd === "setup") {
     const results = runSetup({ remove: argv.includes("--remove"), dryRun: argv.includes("--dry-run"), lang });
     process.stdout.write(formatResults(results, lang) + "\n");
@@ -85,7 +96,9 @@ async function main(): Promise<void> {
   process.on("SIGTERM", shutdown);
   process.stdin.on("close", shutdown);
   await server.connect(transport);
-  process.stderr.write(`DeskDock ${VERSION} ready (policy: ${policyPath()})\n`);
+  let panelUrl = "";
+  try { const panel = await startPanel({ policy, version: VERSION }); panelUrl = panel.url; } catch (e) { process.stderr.write(`DeskDock: control panel not started: ${(e as Error).message}\n`); }
+  process.stderr.write(`DeskDock ${VERSION} ready (policy: ${policyPath()}${panelUrl ? `, panel: ${panelUrl}` : ""})\n`);
 }
 
 const isMain = process.argv[1] && /index\.(js|ts)$/.test(process.argv[1]);

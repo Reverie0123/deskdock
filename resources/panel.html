@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DeskDock</title>
+<style>
+  :root { color-scheme: light dark; --bg: #f6f7f9; --card: #fff; --fg: #1b1f24; --muted: #6b7280; --line: #e3e6ea; --accent: #2563eb; --ok: #15803d; --warn: #b45309; --bad: #b91c1c; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #111418; --card: #1a1f26; --fg: #e6e8eb; --muted: #9aa3ad; --line: #2b323b; --accent: #60a5fa; --ok: #4ade80; --warn: #fbbf24; --bad: #f87171; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 system-ui, "Segoe UI", "Microsoft YaHei", sans-serif; }
+  header { display: flex; align-items: center; gap: 16px; padding: 12px 20px; border-bottom: 1px solid var(--line); background: var(--card); position: sticky; top: 0; }
+  header h1 { font-size: 16px; margin: 0; }
+  header .muted, .muted { color: var(--muted); }
+  header .spacer { flex: 1; }
+  nav button, .btn { border: 1px solid var(--line); background: var(--card); color: var(--fg); padding: 6px 12px; border-radius: 6px; cursor: pointer; font: inherit; }
+  nav button.active { border-color: var(--accent); color: var(--accent); }
+  .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px 20px 40px; }
+  section { display: none; } section.active { display: block; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; }
+  select, input { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
+  code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); }
+  .ok { color: var(--ok); } .denied { color: var(--warn); } .error { color: var(--bad); }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .stat { font-size: 22px; font-weight: 600; }
+  .timeline .step { padding: 10px 12px; border-left: 3px solid var(--line); margin-left: 8px; }
+  .timeline .step.current { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+  .small { font-size: 12px; }
+  .danger { color: var(--bad); }
+  #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--fg); color: var(--bg); padding: 8px 14px; border-radius: 8px; opacity: 0; transition: opacity .2s; }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>DeskDock <span class="muted small" id="ver"></span></h1>
+  <nav>
+    <button data-tab="status" class="active" data-i18n="tab.status">状态</button>
+    <button data-tab="policy" data-i18n="tab.policy">权限</button>
+    <button data-tab="logs" data-i18n="tab.logs">日志</button>
+  </nav>
+  <div class="spacer"></div>
+  <button class="btn" id="lang">EN</button>
+</header>
+<main>
+  <section id="status" class="active">
+    <div class="card row" style="gap: 40px">
+      <div><div class="muted" data-i18n="status.calls">今天的调用</div><div class="stat" id="calls">–</div></div>
+      <div><div class="muted" data-i18n="status.denied">今天被拒绝</div><div class="stat" id="denied">–</div></div>
+    </div>
+    <div class="card">
+      <div><span class="muted" data-i18n="status.policyFile">权限表文件</span>: <code id="policyPath"></code></div>
+      <div><span class="muted" data-i18n="status.logsDir">日志目录</span>: <code id="logsDir"></code></div>
+      <p class="muted small" data-i18n="status.hint">AI 客户端每次调用 DeskDock 的工具，都会先查权限表，再记一条日志。这个页面只在你的电脑上，只监听 127.0.0.1。</p>
+    </div>
+  </section>
+
+  <section id="policy">
+    <div class="card">
+      <div class="row">
+        <label><span data-i18n="policy.default">默认级别</span> <select id="defaultLevel"></select></label>
+        <span class="muted small" data-i18n="policy.defaultHint">没有匹配规则的程序用这个级别</span>
+        <div class="spacer"></div>
+        <button class="btn" id="resetPolicy" data-i18n="policy.reset">恢复默认</button>
+        <button class="btn primary" id="savePolicy" data-i18n="policy.save">保存</button>
+      </div>
+    </div>
+    <div class="card">
+      <table id="rules"><thead><tr><th data-i18n="policy.app">程序（进程名）或 title:标题片段</th><th data-i18n="policy.level">级别</th><th></th></tr></thead><tbody></tbody></table>
+      <div class="row" style="margin-top: 10px">
+        <input id="newKey" placeholder="notepad.exe 或 title:网上银行" style="min-width: 280px">
+        <select id="newLevel"></select>
+        <button class="btn" id="addRule" data-i18n="policy.add">添加</button>
+      </div>
+      <p class="muted small" data-i18n="policy.levels">block 禁止一切；read 只能截图和读控件；click 加鼠标；full 加键盘输入。</p>
+    </div>
+    <div class="card" id="seenCard" style="display:none">
+      <div class="muted" data-i18n="policy.seen">最近日志里出现过、但还没有规则的程序</div>
+      <div class="row" id="seen" style="margin-top: 8px"></div>
+    </div>
+  </section>
+
+  <section id="logs">
+    <div class="card row">
+      <label><span data-i18n="logs.date">日期</span> <select id="date"></select></label>
+      <label><span data-i18n="logs.outcome">结果</span> <select id="outcome"><option value="">all</option><option value="ok">ok</option><option value="denied">denied</option><option value="error">error</option></select></label>
+      <label><span data-i18n="logs.tool">工具</span> <select id="tool"><option value="">all</option></select></label>
+      <div class="spacer"></div>
+      <button class="btn" id="viewTable" data-i18n="logs.table">表格</button>
+      <button class="btn" id="viewTimeline" data-i18n="logs.timeline">时间线</button>
+      <button class="btn" id="reload" data-i18n="logs.reload">刷新</button>
+    </div>
+    <div class="card" id="tableView">
+      <table id="logTable"><thead><tr><th data-i18n="logs.time">时间</th><th data-i18n="logs.toolCol">工具</th><th data-i18n="logs.target">目标</th><th data-i18n="logs.args">参数</th><th data-i18n="logs.result">结果</th><th>ms</th></tr></thead><tbody></tbody></table>
+      <p class="muted small" id="logEmpty" data-i18n="logs.empty">这一天没有记录。</p>
+    </div>
+    <div class="card timeline" id="timelineView" style="display:none">
+      <div class="row">
+        <button class="btn" id="prev">◀</button>
+        <span id="pos" class="muted"></span>
+        <button class="btn" id="next">▶</button>
+        <button class="btn" id="play" data-i18n="logs.play">自动播放</button>
+      </div>
+      <div id="steps" style="margin-top: 10px"></div>
+    </div>
+  </section>
+</main>
+<div id="toast"></div>
+<script>
+const I18N = {
+  zh: { "tab.status": "状态", "tab.policy": "权限", "tab.logs": "日志", "status.calls": "今天的调用", "status.denied": "今天被拒绝", "status.policyFile": "权限表文件", "status.logsDir": "日志目录",
+    "status.hint": "AI 客户端每次调用 DeskDock 的工具，都会先查权限表，再记一条日志。这个页面只在你的电脑上，只监听 127.0.0.1。",
+    "policy.default": "默认级别", "policy.defaultHint": "没有匹配规则的程序用这个级别", "policy.reset": "恢复默认", "policy.save": "保存", "policy.app": "程序（进程名）或 title:标题片段", "policy.level": "级别", "policy.add": "添加",
+    "policy.levels": "block 禁止一切；read 只能截图和读控件；click 加鼠标；full 加键盘输入。", "policy.seen": "最近日志里出现过、但还没有规则的程序", "policy.saved": "已保存，立即生效", "policy.remove": "删除",
+    "logs.date": "日期", "logs.outcome": "结果", "logs.tool": "工具", "logs.table": "表格", "logs.timeline": "时间线", "logs.reload": "刷新", "logs.time": "时间", "logs.toolCol": "工具", "logs.target": "目标", "logs.args": "参数", "logs.result": "结果", "logs.empty": "这一天没有记录。", "logs.play": "自动播放", "logs.pause": "暂停", "logs.step": "第 {i} / {n} 步" },
+  en: { "tab.status": "Status", "tab.policy": "Permissions", "tab.logs": "Log", "status.calls": "Calls today", "status.denied": "Denied today", "status.policyFile": "Policy file", "status.logsDir": "Log folder",
+    "status.hint": "Every tool call from an AI client is checked against the policy and then logged. This page lives on your machine only and listens on 127.0.0.1.",
+    "policy.default": "Default level", "policy.defaultHint": "used when no rule matches", "policy.reset": "Reset to defaults", "policy.save": "Save", "policy.app": "App (process name) or title:substring", "policy.level": "Level", "policy.add": "Add",
+    "policy.levels": "block: nothing; read: screenshot and read controls; click: plus mouse; full: plus keyboard.", "policy.seen": "Apps seen in recent logs without a rule", "policy.saved": "Saved, effective immediately", "policy.remove": "Remove",
+    "logs.date": "Date", "logs.outcome": "Outcome", "logs.tool": "Tool", "logs.table": "Table", "logs.timeline": "Timeline", "logs.reload": "Reload", "logs.time": "Time", "logs.toolCol": "Tool", "logs.target": "Target", "logs.args": "Arguments", "logs.result": "Outcome", "logs.empty": "No entries for this day.", "logs.play": "Auto-play", "logs.pause": "Pause", "logs.step": "Step {i} of {n}" },
+};
+let lang = (localStorage.getItem("deskdock.lang") || (navigator.language.startsWith("zh") ? "zh" : "en"));
+const t = (k, v = {}) => (I18N[lang][k] || k).replace(/\{(\w+)\}/g, (_, n) => v[n]);
+function applyLang() { document.documentElement.lang = lang; document.getElementById("lang").textContent = lang === "zh" ? "EN" : "中"; document.querySelectorAll("[data-i18n]").forEach((el) => el.textContent = t(el.dataset.i18n)); }
+document.getElementById("lang").onclick = () => { lang = lang === "zh" ? "en" : "zh"; localStorage.setItem("deskdock.lang", lang); applyLang(); renderTimeline(); };
+
+const $ = (id) => document.getElementById(id);
+const api = async (path, opts) => { const r = await fetch(path, opts); const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status); return j; };
+const toast = (msg) => { const el = $("toast"); el.textContent = msg; el.classList.add("show"); setTimeout(() => el.classList.remove("show"), 1800); };
+document.querySelectorAll("nav button").forEach((b) => b.onclick = () => { document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("active", x === b)); document.querySelectorAll("main section").forEach((s) => s.classList.toggle("active", s.id === b.dataset.tab)); });
+
+let status, policy, entries = [], levels = [];
+async function loadStatus() {
+  status = await api("/api/status"); levels = status.levels;
+  $("ver").textContent = "v" + status.version; $("calls").textContent = status.callsToday; $("denied").textContent = status.deniedToday;
+  $("policyPath").textContent = status.policyPath; $("logsDir").textContent = status.logsDir;
+  for (const id of ["defaultLevel", "newLevel"]) { const s = $(id); s.innerHTML = levels.map((l) => `<option>${l}</option>`).join(""); }
+}
+function levelSelect(value, onchange) { const s = document.createElement("select"); s.innerHTML = levels.map((l) => `<option ${l === value ? "selected" : ""}>${l}</option>`).join(""); s.onchange = () => onchange(s.value); return s; }
+function renderPolicy() {
+  $("defaultLevel").value = policy.default;
+  const tb = $("rules").querySelector("tbody"); tb.innerHTML = "";
+  for (const key of Object.keys(policy.rules).sort()) {
+    const tr = document.createElement("tr");
+    const td1 = document.createElement("td"); td1.innerHTML = `<code>${key}</code>`;
+    const td2 = document.createElement("td"); td2.appendChild(levelSelect(policy.rules[key], (v) => policy.rules[key] = v));
+    const td3 = document.createElement("td"); const del = document.createElement("button"); del.className = "btn small"; del.textContent = t("policy.remove"); del.onclick = () => { delete policy.rules[key]; renderPolicy(); }; td3.appendChild(del);
+    tr.append(td1, td2, td3); tb.appendChild(tr);
+  }
+  renderSeen();
+}
+function renderSeen() {
+  const seen = new Set(entries.map((e) => (e.target && e.target.process || "").toLowerCase()).filter((p) => p && !(p in policy.rules)));
+  $("seenCard").style.display = seen.size ? "" : "none";
+  $("seen").innerHTML = ""; for (const p of seen) { const b = document.createElement("button"); b.className = "btn small"; b.textContent = "+ " + p; b.onclick = () => { policy.rules[p] = "read"; renderPolicy(); }; $("seen").appendChild(b); }
+}
+async function loadPolicy() { policy = await api("/api/policy"); renderPolicy(); }
+$("defaultLevel").onchange = (e) => policy.default = e.target.value;
+$("addRule").onclick = () => { const k = $("newKey").value.trim().toLowerCase(); if (!k) return; policy.rules[k] = $("newLevel").value; $("newKey").value = ""; renderPolicy(); };
+$("savePolicy").onclick = async () => { try { policy = await api("/api/policy", { method: "PUT", headers: { "content-type": "application/json", "x-deskdock": "panel" }, body: JSON.stringify(policy) }); renderPolicy(); toast(t("policy.saved")); } catch (e) { toast(String(e.message)); } };
+$("resetPolicy").onclick = () => { policy = JSON.parse(JSON.stringify(status.defaults)); renderPolicy(); };
+
+async function loadDates() { const { dates } = await api("/api/logs"); const sel = $("date"); const today = new Date().toISOString().slice(0, 10); const all = dates.includes(today) ? dates : [today, ...dates]; sel.innerHTML = all.map((d) => `<option>${d}</option>`).join(""); }
+function filtered() { const o = $("outcome").value, tl = $("tool").value; return entries.filter((e) => (!o || e.outcome === o) && (!tl || e.tool === tl)); }
+function fmtArgs(a) { return Object.entries(a || {}).map(([k, v]) => `${k}=${typeof v === "string" ? JSON.stringify(v) : JSON.stringify(v)}`).join(" "); }
+function fmtTarget(e) { return e.target ? `${e.target.process} ${e.target.title ? "“" + e.target.title.slice(0, 40) + "”" : ""}` : ""; }
+async function loadLogs() {
+  const date = $("date").value; ({ entries } = await api("/api/logs?date=" + date));
+  const tools = [...new Set(entries.map((e) => e.tool))].sort(); const cur = $("tool").value; $("tool").innerHTML = `<option value="">all</option>` + tools.map((x) => `<option ${x === cur ? "selected" : ""}>${x}</option>`).join("");
+  renderTable(); renderTimeline(); renderSeen();
+}
+function renderTable() {
+  const rows = filtered(); const tb = $("logTable").querySelector("tbody"); tb.innerHTML = ""; $("logEmpty").style.display = rows.length ? "none" : "";
+  for (const e of rows) { const tr = document.createElement("tr"); tr.innerHTML = `<td class="small">${e.ts.slice(11, 19)}</td><td><code>${e.tool}</code></td><td class="small">${fmtTarget(e)}</td><td class="small"><code>${fmtArgs(e.args)}</code>${e.detail ? `<div class="muted">${e.detail}</div>` : ""}</td><td class="${e.outcome}">${e.outcome}</td><td class="small muted">${e.ms}</td>`; tb.appendChild(tr); }
+}
+let cursor = 0, timer = null;
+function renderTimeline() {
+  const rows = filtered(); if (cursor >= rows.length) cursor = Math.max(0, rows.length - 1);
+  $("pos").textContent = rows.length ? t("logs.step", { i: cursor + 1, n: rows.length }) : "";
+  const box = $("steps"); box.innerHTML = "";
+  rows.forEach((e, i) => { const d = document.createElement("div"); d.className = "step" + (i === cursor ? " current" : ""); d.innerHTML = `<div><code>${e.tool}</code> <span class="${e.outcome}">${e.outcome}</span> <span class="muted small">${e.ts.slice(11, 19)} · ${e.ms} ms</span></div><div class="small">${fmtTarget(e)}</div><div class="small"><code>${fmtArgs(e.args)}</code></div>${e.detail ? `<div class="small muted">${e.detail}</div>` : ""}`; if (i === cursor) d.scrollIntoView({ block: "nearest" }); box.appendChild(d); });
+}
+$("prev").onclick = () => { cursor = Math.max(0, cursor - 1); renderTimeline(); };
+$("next").onclick = () => { cursor = Math.min(filtered().length - 1, cursor + 1); renderTimeline(); };
+$("play").onclick = () => { if (timer) { clearInterval(timer); timer = null; $("play").textContent = t("logs.play"); return; } $("play").textContent = t("logs.pause"); timer = setInterval(() => { if (cursor >= filtered().length - 1) { clearInterval(timer); timer = null; $("play").textContent = t("logs.play"); return; } cursor++; renderTimeline(); }, 900); };
+$("viewTable").onclick = () => { $("tableView").style.display = ""; $("timelineView").style.display = "none"; };
+$("viewTimeline").onclick = () => { $("tableView").style.display = "none"; $("timelineView").style.display = ""; renderTimeline(); };
+$("date").onchange = loadLogs; $("outcome").onchange = () => { renderTable(); renderTimeline(); }; $("tool").onchange = () => { renderTable(); renderTimeline(); }; $("reload").onclick = loadLogs;
+
+(async () => { applyLang(); await loadStatus(); await loadPolicy(); await loadDates(); await loadLogs(); })().catch((e) => toast(String(e.message)));
+</script>
+</body>
+</html>

@@ -40,20 +40,21 @@ export function policyPath(): string { return path.join(policyDir(), "policy.jso
 export class PolicyStore {
   private cached: Policy = DEFAULT_POLICY;
   private mtime = 0;
-  constructor(private file: string = policyPath()) {}
+  constructor(private readonly filePath: string = policyPath()) {}
+  get file(): string { return this.filePath; }
 
   /** Writes the default table on first run so users can find and edit it. */
   ensureFile(): void {
-    if (existsSync(this.file)) return;
-    mkdirSync(path.dirname(this.file), { recursive: true });
-    writeFileSync(this.file, JSON.stringify(DEFAULT_POLICY, null, 2) + "\n", "utf8");
+    if (existsSync(this.filePath)) return;
+    mkdirSync(path.dirname(this.filePath), { recursive: true });
+    writeFileSync(this.filePath, JSON.stringify(DEFAULT_POLICY, null, 2) + "\n", "utf8");
   }
 
   get(): Policy {
     try {
-      const st = statSync(this.file);
+      const st = statSync(this.filePath);
       if (st.mtimeMs !== this.mtime) {
-        const raw = JSON.parse(readFileSync(this.file, "utf8")) as Partial<Policy>;
+        const raw = JSON.parse(readFileSync(this.filePath, "utf8")) as Partial<Policy>;
         this.cached = { version: 1, default: raw.default ?? "full", rules: raw.rules ?? {} };
         this.mtime = st.mtimeMs;
       }

@@ -1,0 +1,51 @@
+{
+  "name": "deskdock",
+  "version": "0.1.0",
+  "description": "DeskDock: let Claude, Cursor or any model safely operate any Windows app. 桌面扩展坞：让 AI 安全地操作任意 Windows 程序。",
+  "license": "MIT",
+  "author": "Reverie0123",
+  "type": "module",
+  "bin": {
+    "deskdock": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "resources",
+    "README.md",
+    "README.zh.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "os": [
+    "win32"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "build:helper": "g++ -O2 -std=c++17 -static -s -Wall -Wno-misleading-indentation -o resources/deskdock-helper.exe native/helper/helper.cpp -lole32 -loleaut32 -luuid -lgdiplus -lgdi32 -luser32 -ldwmapi -lshlwapi",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "test": "node --test tests/"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "windows",
+    "desktop-automation",
+    "computer-use",
+    "ui-automation",
+    "claude",
+    "cursor",
+    "agent"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

@@ -61,10 +61,20 @@ static void openPanel() {
     std::wstring w(url.begin(), url.end());
     ShellExecuteW(nullptr, L"open", w.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 }
+static HICON g_icon = nullptr;
+static HICON appIcon() {
+    if (!g_icon) {
+        std::wstring ico = g_exeDir + L"\\deskdock.ico";
+        int cx = GetSystemMetrics(SM_CXSMICON), cy = GetSystemMetrics(SM_CYSMICON);
+        g_icon = (HICON)LoadImageW(nullptr, ico.c_str(), IMAGE_ICON, cx, cy, LR_LOADFROMFILE);
+        if (!g_icon) g_icon = LoadIconW(nullptr, IDI_APPLICATION);
+    }
+    return g_icon;
+}
 static void updateTip() {
     std::wstring tip = isPaused() ? (g_zh ? L"DeskDock（已暂停）" : L"DeskDock (paused)") : (g_zh ? L"DeskDock 桌面扩展坞" : L"DeskDock");
     wcsncpy(g_nid.szTip, tip.c_str(), 127); g_nid.uFlags = NIF_TIP | NIF_SHOWTIP | NIF_ICON | NIF_MESSAGE;
-    g_nid.hIcon = LoadIconW(nullptr, isPaused() ? IDI_WARNING : IDI_APPLICATION);
+    g_nid.hIcon = isPaused() ? LoadIconW(nullptr, IDI_WARNING) : appIcon();
     Shell_NotifyIconW(NIM_MODIFY, &g_nid);
 }
 static void showMenu(HWND hwnd) {
@@ -110,7 +120,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     WNDCLASSW wc{}; wc.lpfnWndProc = wndProc; wc.hInstance = hInst; wc.lpszClassName = L"DeskDockTray"; RegisterClassW(&wc);
     HWND hwnd = CreateWindowW(wc.lpszClassName, L"DeskDock", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, hInst, nullptr);
     g_nid.cbSize = sizeof g_nid; g_nid.hWnd = hwnd; g_nid.uID = 1; g_nid.uCallbackMessage = WM_TRAY; g_nid.uVersion = NOTIFYICON_VERSION_4;
-    g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_SHOWTIP; g_nid.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_SHOWTIP; g_nid.hIcon = appIcon();
     wcsncpy(g_nid.szTip, g_zh ? L"DeskDock 桌面扩展坞" : L"DeskDock", 127); // the tip doubles as the accessible name of the icon
     Shell_NotifyIconW(NIM_ADD, &g_nid); Shell_NotifyIconW(NIM_SETVERSION, &g_nid); updateTip();
     SetTimer(hwnd, 1, 2000, nullptr); // the paused marker can be changed by the panel or scripts; keep the icon in sync

@@ -1,0 +1,49 @@
+{
+  "manifest_version": "0.2",
+  "name": "deskdock",
+  "display_name": "DeskDock",
+  "version": "0.1.0",
+  "description": "Let Claude safely operate any Windows app: windows read as text, click/type/keys, per-app permissions, audit log, OCR fallback, macros.",
+  "long_description": "DeskDock gives Claude hands on the Windows desktop. It lists windows, reads their controls as text (UI Automation) so clicks target controls rather than pixels, types and presses keys, and falls back to the built-in Windows OCR for apps without a UI tree. Every app has a permission level (block / read / click / full) that you edit in a local control panel, every call is written to an audit log you can replay, and repeated tasks can be saved as macros that appear as new tools. Windows 10/11 only.",
+  "author": { "name": "Reverie0123", "url": "https://github.com/Reverie0123" },
+  "repository": { "type": "git", "url": "https://github.com/Reverie0123/deskdock" },
+  "homepage": "https://github.com/Reverie0123/deskdock",
+  "documentation": "https://github.com/Reverie0123/deskdock#readme",
+  "support": "https://github.com/Reverie0123/deskdock/issues",
+  "license": "MIT",
+  "icon": "resources/icon.png",
+  "server": {
+    "type": "node",
+    "entry_point": "dist/index.js",
+    "mcp_config": { "command": "node", "args": ["${__dirname}/dist/index.js"], "env": {} }
+  },
+  "tools": [
+    { "name": "list_windows", "description": "Visible top-level windows with handle, title, process, rect and the permission level that applies" },
+    { "name": "focus_window", "description": "Bring a window to the front" },
+    { "name": "close_window", "description": "Ask a window to close (like clicking its X)" },
+    { "name": "read_window", "description": "A window's controls as text with [ref] numbers, names, values and screen positions" },
+    { "name": "read_screen_text", "description": "OCR fallback: text lines on screen with coordinates" },
+    { "name": "screenshot", "description": "PNG of the screen or one window" },
+    { "name": "click", "description": "Click a control by ref or a point by coordinates" },
+    { "name": "type", "description": "Type Unicode text into the focused control" },
+    { "name": "key", "description": "Press a key or chord such as ctrl+s" },
+    { "name": "scroll", "description": "Scroll the wheel at a point" },
+    { "name": "drag", "description": "Drag from one point to another" },
+    { "name": "mouse_move", "description": "Move the cursor without clicking" },
+    { "name": "set_value", "description": "Set an input's text directly by ref" },
+    { "name": "focus_element", "description": "Focus a control by ref" },
+    { "name": "clipboard_get", "description": "Read clipboard text" },
+    { "name": "clipboard_set", "description": "Write clipboard text" },
+    { "name": "screen_info", "description": "Monitors, DPI scale and virtual-screen bounds" },
+    { "name": "list_macros", "description": "List saved macros" },
+    { "name": "save_macro", "description": "Save recent actions as a reusable macro tool" },
+    { "name": "run_macro", "description": "Run a saved macro" },
+    { "name": "delete_macro", "description": "Delete a saved macro" }
+  ],
+  "tools_generated": true,
+  "keywords": ["windows", "desktop", "automation", "computer-use", "ui-automation", "accessibility", "ocr", "permissions", "audit", "macros", "chinese"],
+  "compatibility": {
+    "platforms": ["win32"],
+    "runtimes": { "node": ">=20.0.0" }
+  }
+}

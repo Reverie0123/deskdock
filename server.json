@@ -1,0 +1,22 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+  "name": "io.github.Reverie0123/deskdock",
+  "description": "Let Claude, Cursor or any model safely operate any Windows app: UI tree as text, per-app permissions, audit log, OCR fallback, macros.",
+  "repository": {
+    "url": "https://github.com/Reverie0123/deskdock",
+    "source": "github"
+  },
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "deskdock",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "runtimeHint": "npx"
+    }
+  ]
+}

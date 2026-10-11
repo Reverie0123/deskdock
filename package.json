@@ -11,9 +11,11 @@
   "files": [
     "dist",
     "resources",
+    "manifest.json",
     "README.md",
     "README.zh.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "engines": {
     "node": ">=20"
@@ -29,7 +31,9 @@
     "test": "node --test --test-concurrency=1 tests/*.test.mjs",
     "test:e2e": "node tests/e2e/notepad.e2e.mjs",
     "build:tray": "g++ -O2 -std=c++17 -static -s -Wall -mwindows -municode -o resources/deskdock-tray.exe native/tray/tray.cpp -lshell32 -luser32 -lole32",
-    "tray": "start resources/deskdock-tray.exe"
+    "tray": "start resources/deskdock-tray.exe",
+    "prepublishOnly": "npm run build && npm test",
+    "pack:mcpb": "npx @anthropic-ai/mcpb pack . dist-mcpb/deskdock.mcpb"
   },
   "keywords": [
     "mcp",
@@ -50,5 +54,14 @@
     "@types/node": "^26.6.5",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
+  },
+  "mcpName": "io.github.Reverie0123/deskdock",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Reverie0123/deskdock.git"
+  },
+  "homepage": "https://github.com/Reverie0123/deskdock#readme",
+  "bugs": {
+    "url": "https://github.com/Reverie0123/deskdock/issues"
   }
 }

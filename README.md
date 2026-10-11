@@ -115,6 +115,8 @@ The native helper (`resources/deskdock-helper.exe`) is prebuilt. Rebuild it with
 
 **Why does it only see three buttons in some apps?** That app does not expose its UI tree (common with Electron apps that disabled accessibility). Use `read_screen_text` or `screenshot` there; DeskDock tells the model to do so automatically.
 
+**Can it mess up a document I have open?** Yes, in principle: `type` goes to whatever control has focus. The model is instructed to focus and verify the target window first, and every call is in the audit log, but keep sensitive work on `read` or `block` while an agent is running, and save your files.
+
 **Can it type my passwords?** Policy aside, the tool instructions tell the model never to enter passwords or payment details and to ask you instead. Keep password managers and banking apps on `block`.
 
 ## Development

@@ -29,6 +29,7 @@ function formatNode(n: UiaNode): string {
   const parts = [`[${n.ref}]`, n.type];
   if (n.name) parts.push(JSON.stringify(n.name));
   if (n.value !== undefined) parts.push(`value=${JSON.stringify(n.value.length > 120 ? n.value.slice(0, 120) + "..." : n.value)}`);
+  if (n.selected !== undefined) parts.push(`selected=${JSON.stringify(n.selected)}`);
   if (n.checked) parts.push(`checked=${n.checked}`);
   if (n.enabled === false) parts.push("disabled");
   if (n.offscreen) parts.push("offscreen");
@@ -114,6 +115,16 @@ export function registerTools(server: McpServer, deps: Deps): void {
   }, guarded("focus_window", "click", (a) => byHwnd(a.hwnd), async (a) => {
     const r = await helper.call<{ focused: boolean; window: WindowInfo }>("focus_window", { hwnd: a.hwnd });
     return text(`${r.focused ? "Focused" : "Could not take focus (an elevated window may be in front)"}: ${formatWindow(r.window)}`);
+  }));
+
+  server.registerTool("close_window", {
+    title: "Close window",
+    description: "Ask a window to close (same as clicking its X). The app may show its own save prompt; read_window to handle it. Prefer this over alt+f4, which global hotkey tools can swallow. 关闭窗口。",
+    inputSchema: { hwnd: z.number().int().describe("Window handle from list_windows") },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+  }, guarded("close_window", "click", (a) => byHwnd(a.hwnd), async (a) => {
+    const r = await helper.call<{ window: WindowInfo; closed: boolean }>("close_window", { hwnd: a.hwnd });
+    return text(`${r.closed ? "Closed" : "Close requested (window still open, it may be asking to save)"}: ${formatWindow(r.window)}`);
   }));
 
   server.registerTool("screenshot", {

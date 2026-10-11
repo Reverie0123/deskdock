@@ -82,7 +82,7 @@ try {
   if (ourTab) {
     try {
       await call("focus_window", { hwnd: ourTab }); await sleep(200); await assertOurs(fileName);
-      await call("key", { keys: "ctrl+w" }); // close only our tab; other tabs stay
+      await call("key", { keys: "ctrl+w" }); // close only our tab; other tabs stay (ctrl+w, not alt+f4: Ping Wheel eats Alt)
       await sleep(400);
       const still = (await windows()).find((l) => /\[notepad\.exe\]/i.test(l) && l.includes(fileName));
       if (still) { log("tab still open (unsaved prompt?), pressing alt+n to discard"); await call("key", { keys: "alt+n" }); }

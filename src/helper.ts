@@ -11,7 +11,7 @@ export interface WindowInfo {
 }
 export interface UiaNode {
   ref: number; depth: number; type: string; name: string; rect: { x: number; y: number; w: number; h: number };
-  enabled?: boolean; offscreen?: boolean; focusable?: boolean; automationId?: string; value?: string; checked?: "on" | "off" | "mixed";
+  enabled?: boolean; offscreen?: boolean; focusable?: boolean; automationId?: string; value?: string; selected?: string; checked?: "on" | "off" | "mixed";
 }
 export interface Snapshot { window: WindowInfo; nodes: UiaNode[]; truncated: boolean }
 export interface Screenshot { png_base64: string; width: number; height: number; origin: { x: number; y: number }; scale: number }

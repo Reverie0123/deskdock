@@ -79,10 +79,26 @@ static RECT frameRect(HWND h) {
     if (FAILED(DwmGetWindowAttribute(h, DWMWA_EXTENDED_FRAME_BOUNDS, &r, sizeof(r)))) GetWindowRect(h, &r);
     return r;
 }
+// UWP / packaged apps are hosted by ApplicationFrameHost.exe: the real app owns the CoreWindow child.
+static DWORD realPid(HWND h, DWORD pid) {
+    wchar_t cls[128] = L""; GetClassNameW(h, cls, 128);
+    if (wcscmp(cls, L"ApplicationFrameWindow") != 0) return pid;
+    struct S { DWORD host; DWORD found; } st{ pid, pid };
+    EnumChildWindows(h, [](HWND c, LPARAM lp) -> BOOL {
+        wchar_t cc[128] = L""; GetClassNameW(c, cc, 128);
+        if (wcscmp(cc, L"Windows.UI.Core.CoreWindow") == 0) {
+            DWORD cp = 0; GetWindowThreadProcessId(c, &cp);
+            if (cp && cp != ((S*)lp)->host) { ((S*)lp)->found = cp; return FALSE; }
+        }
+        return TRUE;
+    }, (LPARAM)&st);
+    return st.found;
+}
 static json windowJson(HWND h) {
     wchar_t title[512] = L"", cls[256] = L"";
     GetWindowTextW(h, title, 512); GetClassNameW(h, cls, 256);
     DWORD pid = 0; GetWindowThreadProcessId(h, &pid);
+    pid = realPid(h, pid);
     return {
         {"hwnd", (long long)(intptr_t)h}, {"title", w2u(title)}, {"class", w2u(cls)},
         {"pid", (long long)pid}, {"process", processName(pid)}, {"rect", rectJson(frameRect(h))},
@@ -137,6 +153,14 @@ static json focusWindow(const json& a) {
     return {{"focused", GetForegroundWindow() == h}, {"window", windowJson(h)}};
 }
 
+static json closeWindow(const json& a) {
+    HWND h = hwndArg(a);
+    if (!h) throw std::runtime_error("hwnd required");
+    json before = windowJson(h);
+    PostMessageW(h, WM_CLOSE, 0, 0);
+    Sleep(300);
+    return {{"window", before}, {"closed", !IsWindow(h)}};
+}
 // ---------- screenshot ----------
 static ULONG_PTR g_gdiToken = 0;
 static int encoderClsid(const wchar_t* mime, CLSID* clsid) {
@@ -385,6 +409,18 @@ static void walk(IUIAutomation* ua, IUIAutomationTreeWalker* walker, IUIAutomati
         std::string a = b2u(aid); if (!a.empty()) node["automationId"] = a;
         IUIAutomationValuePattern* vp = nullptr; el->GetCurrentPatternAs(UIA_ValuePatternId, __uuidof(IUIAutomationValuePattern), (void**)&vp);
         if (vp) { BSTR v = nullptr; vp->get_CurrentValue(&v); std::string vs = b2u(v); if (!vs.empty()) node["value"] = vs.size() > 2000 ? vs.substr(0, 2000) + "..." : vs; if (v) SysFreeString(v); vp->Release(); }
+        IUIAutomationSelectionPattern* sp = nullptr; el->GetCurrentPatternAs(UIA_SelectionPatternId, __uuidof(IUIAutomationSelectionPattern), (void**)&sp);
+        if (sp) {
+            IUIAutomationElementArray* sel = nullptr; sp->GetCurrentSelection(&sel);
+            if (sel) { int n = 0; sel->get_Length(&n); std::string names;
+                for (int i = 0; i < n && i < 5; i++) { IUIAutomationElement* se = nullptr; sel->GetElement(i, &se); if (se) { BSTR sn = nullptr; se->get_CurrentName(&sn); if (!names.empty()) names += " | "; names += b2u(sn); if (sn) SysFreeString(sn); se->Release(); } }
+                if (n > 0) node["selected"] = names; sel->Release(); }
+            sp->Release();
+        }
+        if (!node.contains("value")) {
+            IUIAutomationLegacyIAccessiblePattern* lp = nullptr; el->GetCurrentPatternAs(UIA_LegacyIAccessiblePatternId, __uuidof(IUIAutomationLegacyIAccessiblePattern), (void**)&lp);
+            if (lp) { BSTR lv = nullptr; lp->get_CurrentValue(&lv); std::string ls = b2u(lv); if (!ls.empty() && ls != nm) node["value"] = ls.size() > 2000 ? ls.substr(0, 2000) + "..." : ls; if (lv) SysFreeString(lv); lp->Release(); }
+        }
         IUIAutomationTogglePattern* tp = nullptr; el->GetCurrentPatternAs(UIA_TogglePatternId, __uuidof(IUIAutomationTogglePattern), (void**)&tp);
         if (tp) { ToggleState ts; tp->get_CurrentToggleState(&ts); node["checked"] = ts == ToggleState_On ? "on" : ts == ToggleState_Off ? "off" : "mixed"; tp->Release(); }
         out.push_back(node); budget--;
@@ -511,6 +547,7 @@ static json dispatch(const std::string& op, const json& a) {
     if (op == "list_windows") return listWindows(a);
     if (op == "focus_window") return focusWindow(a);
     if (op == "window_at") return windowAt(a);
+    if (op == "close_window") return closeWindow(a);
     if (op == "foreground_window") return foregroundWindow(a);
     if (op == "screenshot") return screenshot(a);
     if (op == "screen_info") return screenInfo(a);

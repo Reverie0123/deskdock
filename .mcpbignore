@@ -1,0 +1,22 @@
+# not needed inside the Claude Desktop extension bundle
+src/
+native/
+scripts/
+tests/
+docs/
+dist-mcpb/
+.git/
+.gitignore
+.mcpbignore
+tsconfig.json
+server.json
+*.map
+进度记录.md
+待办-需要你动手.md
+node_modules/typescript/
+node_modules/tsx/
+node_modules/esbuild/
+node_modules/@esbuild/
+node_modules/@types/
+node_modules/.bin/
+node_modules/.package-lock.json

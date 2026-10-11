@@ -167,6 +167,7 @@ $("resetPolicy").onclick = () => { policy = JSON.parse(JSON.stringify(status.def
 
 async function loadDates() { const { dates } = await api("/api/logs"); const sel = $("date"); const today = new Date().toISOString().slice(0, 10); const all = dates.includes(today) ? dates : [today, ...dates]; sel.innerHTML = all.map((d) => `<option>${d}</option>`).join(""); }
 function filtered() { const o = $("outcome").value, tl = $("tool").value; return entries.filter((e) => (!o || e.outcome === o) && (!tl || e.tool === tl)); }
+function fmtTime(ts) { const d = new Date(ts); return isNaN(d) ? String(ts).slice(11, 19) : d.toLocaleTimeString(undefined, { hour12: false }); }
 function fmtArgs(a) { return Object.entries(a || {}).map(([k, v]) => `${k}=${typeof v === "string" ? JSON.stringify(v) : JSON.stringify(v)}`).join(" "); }
 function fmtTarget(e) { return e.target ? `${e.target.process} ${e.target.title ? "“" + e.target.title.slice(0, 40) + "”" : ""}` : ""; }
 async function loadLogs() {
@@ -176,14 +177,14 @@ async function loadLogs() {
 }
 function renderTable() {
   const rows = filtered(); const tb = $("logTable").querySelector("tbody"); tb.innerHTML = ""; $("logEmpty").style.display = rows.length ? "none" : "";
-  for (const e of rows) { const tr = document.createElement("tr"); tr.innerHTML = `<td class="small">${e.ts.slice(11, 19)}</td><td><code>${e.tool}</code></td><td class="small">${fmtTarget(e)}</td><td class="small"><code>${fmtArgs(e.args)}</code>${e.detail ? `<div class="muted">${e.detail}</div>` : ""}</td><td class="${e.outcome}">${e.outcome}</td><td class="small muted">${e.ms}</td>`; tb.appendChild(tr); }
+  for (const e of rows) { const tr = document.createElement("tr"); tr.innerHTML = `<td class="small">${fmtTime(e.ts)}</td><td><code>${e.tool}</code></td><td class="small">${fmtTarget(e)}</td><td class="small"><code>${fmtArgs(e.args)}</code>${e.detail ? `<div class="muted">${e.detail}</div>` : ""}</td><td class="${e.outcome}">${e.outcome}</td><td class="small muted">${e.ms}</td>`; tb.appendChild(tr); }
 }
 let cursor = 0, timer = null;
 function renderTimeline() {
   const rows = filtered(); if (cursor >= rows.length) cursor = Math.max(0, rows.length - 1);
   $("pos").textContent = rows.length ? t("logs.step", { i: cursor + 1, n: rows.length }) : "";
   const box = $("steps"); box.innerHTML = "";
-  rows.forEach((e, i) => { const d = document.createElement("div"); d.className = "step" + (i === cursor ? " current" : ""); d.innerHTML = `<div><code>${e.tool}</code> <span class="${e.outcome}">${e.outcome}</span> <span class="muted small">${e.ts.slice(11, 19)} · ${e.ms} ms</span></div><div class="small">${fmtTarget(e)}</div><div class="small"><code>${fmtArgs(e.args)}</code></div>${e.detail ? `<div class="small muted">${e.detail}</div>` : ""}`; if (i === cursor) d.scrollIntoView({ block: "nearest" }); box.appendChild(d); });
+  rows.forEach((e, i) => { const d = document.createElement("div"); d.className = "step" + (i === cursor ? " current" : ""); d.innerHTML = `<div><code>${e.tool}</code> <span class="${e.outcome}">${e.outcome}</span> <span class="muted small">${fmtTime(e.ts)} · ${e.ms} ms</span></div><div class="small">${fmtTarget(e)}</div><div class="small"><code>${fmtArgs(e.args)}</code></div>${e.detail ? `<div class="small muted">${e.detail}</div>` : ""}`; if (i === cursor) d.scrollIntoView({ block: "nearest" }); box.appendChild(d); });
 }
 $("prev").onclick = () => { cursor = Math.max(0, cursor - 1); renderTimeline(); };
 $("next").onclick = () => { cursor = Math.min(filtered().length - 1, cursor + 1); renderTimeline(); };

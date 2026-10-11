@@ -12,7 +12,9 @@ const outDir = process.env.DESKDOCK_TEST_OUT || path.join(root, "tests", "out");
 
 test("mcp server read-only tools", async (t) => {
   const client = new Client({ name: "deskdock-test", version: "0.0.0" });
-  const transport = new StdioClientTransport({ command: process.execPath, args: [path.join(root, "dist", "index.js")], stderr: "pipe" });
+  // keep the test from writing into the real policy / audit log / macros folders
+  const home = mkdirSync(path.join(outDir, "home"), { recursive: true }) ?? path.join(outDir, "home");
+  const transport = new StdioClientTransport({ command: process.execPath, args: [path.join(root, "dist", "index.js")], stderr: "pipe", env: { ...process.env, DESKDOCK_HOME: home } });
   await client.connect(transport);
   try {
     const { tools } = await client.listTools();

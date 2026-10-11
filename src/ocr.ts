@@ -41,8 +41,14 @@ export class Ocr {
     const p = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath()], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
     this.proc = p;
     p.stderr.on("data", (d) => process.stderr.write(`[deskdock-ocr] ${d}`));
+    p.on("error", () => { /* handled through the exit path below */ });
+    p.stdin.on("error", () => { /* a dead worker is replaced on the next call */ });
     this.ready = new Promise<string[]>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new OcrError("OCR worker did not start within 20 s")), 20000);
+      const timer = setTimeout(() => {
+        reject(new OcrError("OCR worker did not start within 20 s"));
+        try { p.kill(); } catch { /* ignore */ }
+        if (this.proc === p) { this.proc = null; this.ready = null; }
+      }, 20000);
       const rl = createInterface({ input: p.stdout });
       rl.on("line", (line) => {
         let msg: { ready?: boolean; languages?: string[]; id?: number; ok?: boolean; error?: string } & Partial<OcrResult>;
@@ -59,7 +65,7 @@ export class Ocr {
         reject(new OcrError(`OCR worker exited with code ${code}`));
         for (const [, pend] of this.pending) { clearTimeout(pend.timer); pend.reject(new OcrError("OCR worker exited")); }
         this.pending.clear();
-        this.proc = null; this.ready = null;
+        if (this.proc === p) { this.proc = null; this.ready = null; }
       });
     });
     return this.ready;
@@ -74,7 +80,8 @@ export class Ocr {
         const id = this.nextId++;
         const timer = setTimeout(() => { this.pending.delete(id); reject(new OcrError(`OCR timed out after ${timeoutMs} ms`)); try { p.kill(); } catch { /* ignore */ } }, timeoutMs);
         this.pending.set(id, { resolve, reject, timer });
-        p.stdin.write(JSON.stringify({ id, path: pngPath, lang: lang ?? null }) + "\n");
+        // the path travels base64-encoded: stdin text encoding is unreliable for non-ASCII paths (Chinese user names)
+        p.stdin.write(JSON.stringify({ id, pathB64: Buffer.from(pngPath, "utf8").toString("base64"), lang: lang ?? null }) + "\n");
       });
     };
     const next = this.queue.then(run, run);

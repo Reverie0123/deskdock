@@ -47,6 +47,8 @@ One command finds the AI clients installed on this machine and adds DeskDock to 
 | `scroll`, `drag`, `mouse_move` | Wheel, drag and hover |
 | `set_value`, `focus_element` | Set an input's text or focus a control directly by ref |
 | `clipboard_get`, `clipboard_set` | Read and write the clipboard |
+| `close_window` | Ask a window to close (like clicking its X) |
+| `list_macros`, `save_macro`, `run_macro`, `delete_macro` | Record, replay and manage macros (see below) |
 | `screen_info` | Monitors, DPI scale and virtual-screen bounds |
 
 The usual flow the model follows: `list_windows` → `focus_window` → `read_window` → `click` / `type` → `read_window` again to verify. All coordinates are physical screen pixels.
@@ -77,7 +79,7 @@ The policy lives at `%APPDATA%\deskdock\policy.json` (run `deskdock policy` to p
 | `click` | yes | yes | no |
 | `full` | yes | yes | yes |
 
-Keys are lower-case process names, or `title:` followed by a substring of the window title. The first matching rule wins; otherwise `default` applies. When a tool is denied, the model receives the reason and the file path, and is told to ask you to do that step yourself.
+Keys are lower-case process names, or `title:` followed by a substring of the window title. When several rules match (a process rule and a `title:` rule), the strictest one wins; otherwise `default` applies. Windows whose process cannot be identified are capped at `read`. When a tool is denied, the model receives the reason and the file path, and is told to ask you to do that step yourself.
 
 Note that `read` still lets the model see what is on screen in that app, including a browser's address bar. Use `block` for anything it should not even look at.
 
@@ -101,7 +103,7 @@ save_macro(name="wechat_send", description="Send a WeChat message", fromLast=4,
 
 ## Audit log
 
-Every tool call is appended to `%APPDATA%\deskdock\logs\YYYY-MM-DD.jsonl`: time, tool, arguments, the target window and process, outcome (ok / denied / error) and duration. Typed text is logged as a character count, never as content. Screenshots are not stored.
+Every tool call is appended to `%APPDATA%\deskdock\logs\YYYY-MM-DD.jsonl`: time, tool, arguments, the target window and process, outcome (ok / denied / error) and duration. Typed text is logged as a character count, never as content. Screenshots are not stored. Note that a macro file does contain the text that was typed while recording it, unless you turned it into a parameter.
 
 ## Apps without a UI tree
 
@@ -145,7 +147,7 @@ npm run build:helper   # native helper (MinGW g++)
 npm test               # read-only tests; they never inject input
 ```
 
-`tests/e2e/` (coming) injects real mouse and keyboard input; do not run it while you are using the computer.
+`tests/e2e/` injects real mouse and keyboard input (Notepad, Settings, the tray, a macro); do not run it while you are using the computer.
 
 ## License
 

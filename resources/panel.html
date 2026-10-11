@@ -140,6 +140,7 @@ function applyLang() { document.documentElement.lang = lang; document.getElement
 document.getElementById("lang").onclick = () => { lang = lang === "zh" ? "en" : "zh"; localStorage.setItem("deskdock.lang", lang); applyLang(); renderTimeline(); };
 
 const $ = (id) => document.getElementById(id);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const api = async (path, opts) => { const r = await fetch(path, opts); const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status); return j; };
 const toast = (msg) => { const el = $("toast"); el.textContent = msg; el.classList.add("show"); setTimeout(() => el.classList.remove("show"), 1800); };
 document.querySelectorAll("nav button").forEach((b) => b.onclick = () => { document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("active", x === b)); document.querySelectorAll("main section").forEach((s) => s.classList.toggle("active", s.id === b.dataset.tab)); });
@@ -148,7 +149,7 @@ let status, policy, entries = [], levels = [];
 async function loadStatus() {
   status = await api("/api/status"); levels = status.levels;
   $("ver").textContent = "v" + status.version; $("calls").textContent = status.callsToday; $("denied").textContent = status.deniedToday;
-  $("policyPath").textContent = status.policyPath; $("logsDir").textContent = status.logsDir;
+  $("policyPath").textContent = status.policyPath; $("logsDir").textContent = status.logsDir; // textContent: safe
   for (const id of ["defaultLevel", "newLevel"]) { const s = $(id); s.innerHTML = levels.map((l) => `<option>${l}</option>`).join(""); }
 }
 function levelSelect(value, onchange) { const s = document.createElement("select"); s.innerHTML = levels.map((l) => `<option ${l === value ? "selected" : ""}>${l}</option>`).join(""); s.onchange = () => onchange(s.value); return s; }
@@ -157,7 +158,7 @@ function renderPolicy() {
   const tb = $("rules").querySelector("tbody"); tb.innerHTML = "";
   for (const key of Object.keys(policy.rules).sort()) {
     const tr = document.createElement("tr");
-    const td1 = document.createElement("td"); td1.innerHTML = `<code>${key}</code>`;
+    const td1 = document.createElement("td"); td1.innerHTML = `<code>${esc(key)}</code>`;
     const td2 = document.createElement("td"); td2.appendChild(levelSelect(policy.rules[key], (v) => policy.rules[key] = v));
     const td3 = document.createElement("td"); const del = document.createElement("button"); del.className = "btn small"; del.textContent = t("policy.remove"); del.onclick = () => { delete policy.rules[key]; renderPolicy(); }; td3.appendChild(del);
     tr.append(td1, td2, td3); tb.appendChild(tr);
@@ -178,8 +179,8 @@ $("resetPolicy").onclick = () => { policy = JSON.parse(JSON.stringify(status.def
 async function loadDates() { const { dates } = await api("/api/logs"); const sel = $("date"); const today = new Date().toISOString().slice(0, 10); const all = dates.includes(today) ? dates : [today, ...dates]; sel.innerHTML = all.map((d) => `<option>${d}</option>`).join(""); }
 function filtered() { const o = $("outcome").value, tl = $("tool").value; return entries.filter((e) => (!o || e.outcome === o) && (!tl || e.tool === tl)); }
 function fmtTime(ts) { const d = new Date(ts); return isNaN(d) ? String(ts).slice(11, 19) : d.toLocaleTimeString(undefined, { hour12: false }); }
-function fmtArgs(a) { return Object.entries(a || {}).map(([k, v]) => `${k}=${typeof v === "string" ? JSON.stringify(v) : JSON.stringify(v)}`).join(" "); }
-function fmtTarget(e) { return e.target ? `${e.target.process} ${e.target.title ? "“" + e.target.title.slice(0, 40) + "”" : ""}` : ""; }
+function fmtArgs(a) { return esc(Object.entries(a || {}).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(" ")); }
+function fmtTarget(e) { return e.target ? esc(`${e.target.process} ${e.target.title ? "“" + e.target.title.slice(0, 40) + "”" : ""}`) : ""; }
 async function loadLogs() {
   const date = $("date").value; ({ entries } = await api("/api/logs?date=" + date));
   const tools = [...new Set(entries.map((e) => e.tool))].sort(); const cur = $("tool").value; $("tool").innerHTML = `<option value="">all</option>` + tools.map((x) => `<option ${x === cur ? "selected" : ""}>${x}</option>`).join("");
@@ -187,14 +188,14 @@ async function loadLogs() {
 }
 function renderTable() {
   const rows = filtered(); const tb = $("logTable").querySelector("tbody"); tb.innerHTML = ""; $("logEmpty").style.display = rows.length ? "none" : "";
-  for (const e of rows) { const tr = document.createElement("tr"); tr.innerHTML = `<td class="small">${fmtTime(e.ts)}</td><td><code>${e.tool}</code></td><td class="small">${fmtTarget(e)}</td><td class="small"><code>${fmtArgs(e.args)}</code>${e.detail ? `<div class="muted">${e.detail}</div>` : ""}</td><td class="${e.outcome}">${e.outcome}</td><td class="small muted">${e.ms}</td>`; tb.appendChild(tr); }
+  for (const e of rows) { const tr = document.createElement("tr"); tr.innerHTML = `<td class="small">${esc(fmtTime(e.ts))}</td><td><code>${esc(e.tool)}</code></td><td class="small">${fmtTarget(e)}</td><td class="small"><code>${fmtArgs(e.args)}</code>${e.detail ? `<div class="muted">${esc(e.detail)}</div>` : ""}</td><td class="${esc(e.outcome)}">${esc(e.outcome)}</td><td class="small muted">${esc(e.ms)}</td>`; tb.appendChild(tr); }
 }
 let cursor = 0, timer = null;
 function renderTimeline() {
   const rows = filtered(); if (cursor >= rows.length) cursor = Math.max(0, rows.length - 1);
   $("pos").textContent = rows.length ? t("logs.step", { i: cursor + 1, n: rows.length }) : "";
   const box = $("steps"); box.innerHTML = "";
-  rows.forEach((e, i) => { const d = document.createElement("div"); d.className = "step" + (i === cursor ? " current" : ""); d.innerHTML = `<div><code>${e.tool}</code> <span class="${e.outcome}">${e.outcome}</span> <span class="muted small">${fmtTime(e.ts)} · ${e.ms} ms</span></div><div class="small">${fmtTarget(e)}</div><div class="small"><code>${fmtArgs(e.args)}</code></div>${e.detail ? `<div class="small muted">${e.detail}</div>` : ""}`; if (i === cursor) d.scrollIntoView({ block: "nearest" }); box.appendChild(d); });
+  rows.forEach((e, i) => { const d = document.createElement("div"); d.className = "step" + (i === cursor ? " current" : ""); d.innerHTML = `<div><code>${esc(e.tool)}</code> <span class="${esc(e.outcome)}">${esc(e.outcome)}</span> <span class="muted small">${esc(fmtTime(e.ts))} · ${esc(e.ms)} ms</span></div><div class="small">${fmtTarget(e)}</div><div class="small"><code>${fmtArgs(e.args)}</code></div>${e.detail ? `<div class="small muted">${esc(e.detail)}</div>` : ""}`; if (i === cursor) d.scrollIntoView({ block: "nearest" }); box.appendChild(d); });
 }
 $("prev").onclick = () => { cursor = Math.max(0, cursor - 1); renderTimeline(); };
 $("next").onclick = () => { cursor = Math.min(filtered().length - 1, cursor + 1); renderTimeline(); };
@@ -208,9 +209,9 @@ async function loadMacros() {
   const box = $("macroList"); box.innerHTML = ""; $("macroEmpty").style.display = macros.length ? "none" : "";
   for (const m of macros) {
     const d = document.createElement("div"); d.className = "card";
-    const params = m.params.map((p) => `<code>{{${p.name}}}</code>${p.description ? ` <span class="muted small">${p.description}</span>` : ""}`).join(", ") || "<span class=\"muted\">-</span>";
-    const steps = m.steps.map((st, i) => { const tgt = st.target ? ` <span class="muted">-> ${[st.target.process, st.target.type, st.target.name ? JSON.stringify(st.target.name) : ""].filter(Boolean).join(" ")}</span>` : ""; return `<li><code>${st.tool}</code> <code class="muted">${fmtArgs(st.args)}</code>${tgt}</li>`; }).join("");
-    d.innerHTML = `<div class="row"><strong>macro_${m.name}</strong><span class="muted small">${m.description || ""}</span><div class="spacer"></div><button class="btn small danger">${t("macros.delete")}</button></div>
+    const params = m.params.map((p) => `<code>{{${esc(p.name)}}}</code>${p.description ? ` <span class="muted small">${esc(p.description)}</span>` : ""}`).join(", ") || "<span class=\"muted\">-</span>";
+    const steps = m.steps.map((st, i) => { const tgt = st.target ? ` <span class="muted">-> ${esc([st.target.process, st.target.type, st.target.name ? JSON.stringify(st.target.name) : ""].filter(Boolean).join(" "))}</span>` : ""; return `<li><code>${esc(st.tool)}</code> <code class="muted">${fmtArgs(st.args)}</code>${tgt}</li>`; }).join("");
+    d.innerHTML = `<div class="row"><strong>macro_${esc(m.name)}</strong><span class="muted small">${esc(m.description || "")}</span><div class="spacer"></div><button class="btn small danger">${t("macros.delete")}</button></div>
       <div class="small" style="margin-top:6px"><span class="muted">${t("macros.params")}:</span> ${params}</div>
       <details class="small" style="margin-top:6px"><summary class="muted">${t("macros.steps")} (${m.steps.length})</summary><ol>${steps}</ol></details>`;
     d.querySelector("button").onclick = async () => { if (!confirm(t("macros.confirm"))) return; await api("/api/macros?name=" + encodeURIComponent(m.name), { method: "DELETE", headers: { "x-deskdock": "panel" } }); toast(t("macros.deleted")); loadMacros(); };

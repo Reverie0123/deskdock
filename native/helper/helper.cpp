@@ -22,6 +22,7 @@ using std::min; using std::max;
 #include <future>
 #include <chrono>
 #include <mutex>
+#include <atomic>
 #include <iostream>
 #include <stdexcept>
 #include "json.hpp"
@@ -149,10 +150,7 @@ static json focusWindow(const json& a) {
     BOOL ok = SetForegroundWindow(h);
     BringWindowToTop(h);
     if (fgThread && fgThread != me) AttachThreadInput(fgThread, me, FALSE);
-    if (!ok) { // fallback: simulate an Alt press to unlock foreground rights
-        INPUT in[2] = {}; in[0].type = in[1].type = INPUT_KEYBOARD; in[0].ki.wVk = in[1].ki.wVk = VK_MENU; in[1].ki.dwFlags = KEYEVENTF_KEYUP;
-        SendInput(2, in, sizeof(INPUT)); ok = SetForegroundWindow(h);
-    }
+    if (!ok) { SwitchToThisWindow(h, TRUE); Sleep(50); ok = GetForegroundWindow() == h; } // fallback without synthetic key presses
     Sleep(50);
     return {{"focused", GetForegroundWindow() == h}, {"window", windowJson(h)}};
 }
@@ -277,6 +275,7 @@ static json scroll(const json& a) {
 }
 static json typeText(const json& a) {
     std::wstring w = u2w(a.at("text").get<std::string>());
+    if (w.size() > 20000) w.resize(20000);
     std::vector<INPUT> v;
     for (wchar_t c : w) {
         if (c == L'\n') { // Enter instead of a unicode LF, which most apps ignore
@@ -305,14 +304,17 @@ static WORD vkFromName(std::string k) {
     if (k.size() == 1) { SHORT s = VkKeyScanW((wchar_t)k[0]); if (s != -1) return (WORD)(s & 0xff); }
     throw std::runtime_error("unknown key: " + k);
 }
+static bool keyNeedsShift(const std::string& k) { if (k.size() != 1) return false; SHORT s = VkKeyScanW((wchar_t)k[0]); return s != -1 && (s & 0x100); }
 static json pressKeys(const json& a) {
     std::string combo = a.at("keys").get<std::string>();
-    int repeat = a.value("repeat", 1);
+    int repeat = min(max(a.value("repeat", 1), 1), 50);
     std::vector<std::string> parts; std::string cur;
     for (char c : combo) { if (c == '+' && !cur.empty()) { parts.push_back(cur); cur.clear(); } else cur += c; }
     if (!cur.empty()) parts.push_back(cur);
     if (parts.empty()) throw std::runtime_error("keys required");
-    std::vector<WORD> vks; for (auto& p : parts) vks.push_back(vkFromName(p));
+    std::vector<WORD> vks;
+    bool hasShift = false; for (auto& p : parts) { std::string low = p; std::transform(low.begin(), low.end(), low.begin(), ::tolower); if (low == "shift") hasShift = true; }
+    for (auto& p : parts) { if (!hasShift && keyNeedsShift(p)) { vks.push_back(VK_SHIFT); hasShift = true; } vks.push_back(vkFromName(p)); }
     for (int r = 0; r < repeat; r++) {
         std::vector<INPUT> v;
         for (WORD vk : vks) { INPUT d{}; d.type = INPUT_KEYBOARD; d.ki.wVk = vk; d.ki.wScan = (WORD)MapVirtualKeyW(vk, MAPVK_VK_TO_VSC); v.push_back(d); }
@@ -366,6 +368,7 @@ static const char* controlTypeName(CONTROLTYPEID t) {
 }
 struct RefEntry { std::vector<int> runtimeId; HWND hwnd; RECT rect; };
 static std::mutex g_refMutex; static std::map<int, RefEntry> g_refs; static int g_nextRef = 1;
+static std::atomic<int> g_gen{0}; // bumped per snapshot; a timed-out walk from an older snapshot must not register refs
 
 template <class F> static json withTimeout(F fn, int timeoutMs) {
     auto task = std::make_shared<std::packaged_task<json()>>([fn]() {
@@ -394,8 +397,9 @@ static std::vector<int> runtimeIdOf(IUIAutomationElement* el) {
     }
     return v;
 }
-static void walk(IUIAutomation* ua, IUIAutomationTreeWalker* walker, IUIAutomationElement* el, int depth, int maxDepth, int& budget, json& out, HWND hwnd, bool interactiveOnly) {
+static void walk(IUIAutomation* ua, IUIAutomationTreeWalker* walker, IUIAutomationElement* el, int depth, int maxDepth, int& budget, json& out, HWND hwnd, bool interactiveOnly, int gen) {
     if (!el || depth > maxDepth || budget <= 0) return;
+    if (g_gen.load() != gen) { budget = 0; return; } // a newer snapshot started: stop, do not touch the ref table
     BSTR name = nullptr, cls = nullptr, aid = nullptr; CONTROLTYPEID ct = 0; RECT rc{}; BOOL enabled = TRUE, offscreen = FALSE, focusable = FALSE;
     el->get_CurrentName(&name); el->get_CurrentClassName(&cls); el->get_CurrentAutomationId(&aid); el->get_CurrentControlType(&ct); el->get_CurrentBoundingRectangle(&rc);
     el->get_CurrentIsEnabled(&enabled); el->get_CurrentIsOffscreen(&offscreen); el->get_CurrentIsKeyboardFocusable(&focusable);
@@ -405,7 +409,7 @@ static void walk(IUIAutomation* ua, IUIAutomationTreeWalker* walker, IUIAutomati
     bool include = !structural && (!interactiveOnly || interactive || type == "text" || type == "document");
     if (include) {
         int ref;
-        { std::lock_guard<std::mutex> lk(g_refMutex); ref = g_nextRef++; g_refs[ref] = { runtimeIdOf(el), hwnd, rc }; }
+        { std::lock_guard<std::mutex> lk(g_refMutex); if (g_gen.load() != gen) { budget = 0; if (name) SysFreeString(name); if (cls) SysFreeString(cls); if (aid) SysFreeString(aid); return; } ref = g_nextRef++; g_refs[ref] = { runtimeIdOf(el), hwnd, rc }; }
         json node = {{"ref", ref}, {"depth", depth}, {"type", type}, {"name", nm}, {"rect", rectJson(rc)}};
         if (!enabled) node["enabled"] = false;
         if (offscreen) node["offscreen"] = true;
@@ -434,7 +438,7 @@ static void walk(IUIAutomation* ua, IUIAutomationTreeWalker* walker, IUIAutomati
     if (aid) SysFreeString(aid);
     IUIAutomationElement* child = nullptr; walker->GetFirstChildElement(el, &child);
     while (child && budget > 0) {
-        walk(ua, walker, child, include ? depth + 1 : depth, maxDepth, budget, out, hwnd, interactiveOnly);
+        walk(ua, walker, child, include ? depth + 1 : depth, maxDepth, budget, out, hwnd, interactiveOnly, gen);
         IUIAutomationElement* next = nullptr; walker->GetNextSiblingElement(child, &next); child->Release(); child = next;
     }
     if (child) child->Release();
@@ -474,12 +478,12 @@ static json uiaSnapshot(const json& a) {
         bool chromium = isChromiumWindow(h);
         if (chromium) knockChromium(h);
         json nodes = json::array(); int budget = maxNodes;
-        { std::lock_guard<std::mutex> lk(g_refMutex); g_refs.clear(); g_nextRef = 1; }
+        int gen; { std::lock_guard<std::mutex> lk(g_refMutex); gen = ++g_gen; g_refs.clear(); g_nextRef = 1; }
         IUIAutomationTreeWalker* walker = nullptr; ua.p->get_ControlViewWalker(&walker);
         auto readRoot = [&](HWND root_hwnd, int startDepth) {
             IUIAutomationElement* root = nullptr;
             if (FAILED(ua.p->ElementFromHandle(root_hwnd, &root)) || !root) return;
-            walk(ua.p, walker, root, startDepth, maxDepth, budget, nodes, root_hwnd, interactiveOnly);
+            walk(ua.p, walker, root, startDepth, maxDepth, budget, nodes, root_hwnd, interactiveOnly, gen);
             root->Release();
         };
         readRoot(h, 0);

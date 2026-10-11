@@ -30,10 +30,11 @@ while ($true) {
   if ($line.Trim() -eq "") { continue }
   try {
     $req = $line | ConvertFrom-Json
+    $reqPath = if ($req.pathB64) { [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($req.pathB64)) } else { $req.path }
     $engine = GetEngine $req.lang
     if (-not $engine) { throw "no OCR language pack installed" }
     $sw = [Diagnostics.Stopwatch]::StartNew()
-    $file = Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync($req.path)) ([Windows.Storage.StorageFile])
+    $file = Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync($reqPath)) ([Windows.Storage.StorageFile])
     $stream = Await ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
     $decoder = Await ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
     $bitmap = Await ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
@@ -55,7 +56,7 @@ while ($true) {
   } catch {
     $e = $_.Exception; $msgs = @()
     while ($e) { $msgs += $e.Message; if ($e -is [System.AggregateException] -and $e.InnerExceptions.Count -gt 0) { $e = $e.InnerExceptions[0] } else { $e = $e.InnerException } }
-    $out = @{ id = $req.id; ok = $false; error = ($msgs -join " <- "); path = $req.path } | ConvertTo-Json -Compress
+    $out = @{ id = $req.id; ok = $false; error = ($msgs -join " <- "); path = $reqPath } | ConvertTo-Json -Compress
   }
   [Console]::Out.WriteLine($out); [Console]::Out.Flush()
 }

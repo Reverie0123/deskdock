@@ -47,6 +47,8 @@ npx deskdock setup
 | `scroll`、`drag`、`mouse_move` | 滚轮、拖拽、悬停 |
 | `set_value`、`focus_element` | 按 ref 直接给输入框设值或聚焦 |
 | `clipboard_get`、`clipboard_set` | 读写剪贴板 |
+| `close_window` | 请求关闭窗口（等于点右上角的叉） |
+| `list_macros`、`save_macro`、`run_macro`、`delete_macro` | 录制、回放、管理宏（见下文） |
 | `screen_info` | 显示器布局、缩放比例、虚拟屏幕范围 |
 
 模型通常这样用：`list_windows` → `focus_window` → `read_window` → `click` / `type` → 再 `read_window` 确认。所有坐标都是物理像素。
@@ -77,7 +79,7 @@ npx deskdock setup
 | `click` 只能点 | 是 | 是 | 否 |
 | `full` 完全 | 是 | 是 | 是 |
 
-键是小写的进程名，或者 `title:` 加窗口标题的一部分。先匹配的规则生效，都不匹配用 `default`。工具被拒时，模型会收到原因和这个文件的路径，并被要求让你自己做那一步。
+键是小写的进程名，或者 `title:` 加窗口标题的一部分。多条规则同时命中时（进程规则和 `title:` 规则）取最严的那条，都不匹配用 `default`。识别不出进程的窗口最高只给 `read`。工具被拒时，模型会收到原因和这个文件的路径，并被要求让你自己做那一步。
 
 注意 `read` 仍然允许模型看到那个程序屏幕上的内容，包括浏览器的地址栏。连看都不该看的程序请设为 `block`。
 
@@ -101,7 +103,7 @@ save_macro(name="wechat_send", description="发一条微信", fromLast=4,
 
 ## 审计日志
 
-每次工具调用都追加到 `%APPDATA%\deskdock\logs\年-月-日.jsonl`：时间、工具、参数、目标窗口和进程、结果（成功 / 拒绝 / 出错）、耗时。输入的文字只记字数不记内容，截图不保存。
+每次工具调用都追加到 `%APPDATA%\deskdock\logs\年-月-日.jsonl`：时间、工具、参数、目标窗口和进程、结果（成功 / 拒绝 / 出错）、耗时。输入的文字只记字数不记内容，截图不保存。注意：宏文件里会保存录制时输入的文字，除非你把它换成了参数。
 
 ## 读不到控件树的程序
 
@@ -145,7 +147,7 @@ npm run build:helper   # 原生辅助进程（MinGW g++）
 npm test               # 只读测试，不会注入键鼠
 ```
 
-`tests/e2e/`（待加）会真实注入键鼠，你在用电脑的时候不要跑。
+`tests/e2e/` 会真实注入键鼠（记事本、设置、托盘、宏），你在用电脑的时候不要跑。
 
 ## 许可证
 

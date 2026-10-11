@@ -55,6 +55,9 @@ export function startPanel(opts: { policy: PolicyStore; port?: number; version: 
   const macros = opts.macros ?? new MacroStore();
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    // DNS-rebinding guard: a page on another origin can be made same-origin only by changing Host
+    const host = String(req.headers.host ?? "");
+    if (!/^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i.test(host)) { res.writeHead(403, { "content-type": "text/plain" }); res.end("forbidden host"); return; }
     const send = (code: number, body: string, type = "application/json; charset=utf-8") => { res.writeHead(code, { "content-type": type, "cache-control": "no-store" }); res.end(body); };
     const json = (code: number, v: unknown) => send(code, JSON.stringify(v));
     try {

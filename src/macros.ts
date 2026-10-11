@@ -64,6 +64,7 @@ export function validateMacro(m: Macro): void {
     if (!s.tool || typeof s.tool !== "string") throw new Error(`step ${i + 1}: tool missing`);
     if (/^macro_/.test(s.tool) || ["save_macro", "run_macro", "delete_macro"].includes(s.tool)) throw new Error(`step ${i + 1}: macros cannot call ${s.tool}`);
     if (s.args && typeof s.args !== "object") throw new Error(`step ${i + 1}: args must be an object`);
+    if (s.args && typeof (s.args as Record<string, unknown>).ref === "number" && !s.target) throw new Error(`step ${i + 1}: a ref-based ${s.tool} needs a target (control name/type) to be replayable; use fromLast so it is recorded, or give target`);
   }
   for (const p of m.params ?? []) if (!/^[a-zA-Z][a-zA-Z0-9_]{0,39}$/.test(p.name)) throw new Error(`bad param name "${p.name}"`);
   const used = new Set<string>();

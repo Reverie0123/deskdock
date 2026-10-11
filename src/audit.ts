@@ -33,5 +33,6 @@ export function redactArgs(tool: string, args: Record<string, unknown>): Record<
   if (tool === "type" && typeof out.text === "string") out.text = `${(out.text as string).length} chars`;
   if (tool === "clipboard_set" && typeof out.text === "string") out.text = `${(out.text as string).length} chars`;
   if (tool === "set_value" && typeof out.text === "string") out.text = `${(out.text as string).length} chars`;
+  if (tool === "macro") for (const k of Object.keys(out)) if (typeof out[k] === "string") out[k] = `${(out[k] as string).length} chars`;
   return out;
 }

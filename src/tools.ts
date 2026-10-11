@@ -10,6 +10,7 @@ import { MacroStore, substitute, formatMacro, validateMacro, MACRO_NAME, type Ma
 type Content = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
 type Result = { content: Content[]; isError?: boolean };
 
+class Denied extends Error {}
 const text = (t: string): Result => ({ content: [{ type: "text", text: t }] });
 const fail = (t: string): Result => ({ content: [{ type: "text", text: t }], isError: true });
 
@@ -66,6 +67,13 @@ export function registerTools(server: McpServer, deps: Deps): void {
     return w;
   }
 
+  /** For a full-screen capture: refuse while any blocked app is visible, since the screenshot would show it. */
+  async function fullScreenAllowed(): Promise<undefined> {
+    const wins = await helper.call<WindowInfo[]>("list_windows");
+    const blocked = wins.filter((w) => !w.minimized && policy.levelFor(w.process, w.title) === "block");
+    if (blocked.length) throw new Denied(`Full-screen capture refused: a blocked app is visible (${blocked.map((w) => `${w.process} "${w.title.slice(0, 30)}"`).join(", ")}). Capture a specific window with hwnd, or ask the user to minimize that app.`);
+    return undefined;
+  }
   async function capture(hwnd: number | undefined, maxEdge: number): Promise<Screenshot> {
     let scale = 1;
     if (hwnd) {
@@ -114,8 +122,9 @@ export function registerTools(server: McpServer, deps: Deps): void {
         return r;
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        audit.write({ ts: new Date().toISOString(), tool, args: redactArgs(tool, args), target: win && { process: win.process, title: win.title, hwnd: win.hwnd }, outcome: "error", detail: msg, ms: Date.now() - t0 });
-        return fail(`${tool} failed: ${msg}`);
+        const outcome = e instanceof Denied ? "denied" : "error";
+        audit.write({ ts: new Date().toISOString(), tool, args: redactArgs(tool, args), target: win && { process: win.process, title: win.title, hwnd: win.hwnd }, outcome, detail: msg, ms: Date.now() - t0 });
+        return fail(outcome === "denied" ? msg : `${tool} failed: ${msg}`);
       }
     };
     handlers.set(tool, fn as (args: Record<string, unknown>) => Promise<Result>);
@@ -128,17 +137,17 @@ export function registerTools(server: McpServer, deps: Deps): void {
     description: "Monitors, their positions, sizes and DPI scale, and the virtual-screen bounds. All DeskDock coordinates are physical pixels in this space. 显示器布局与缩放比例。",
     inputSchema: {},
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-  }, async () => text(JSON.stringify(await helper.call("screen_info"), null, 1)));
+  }, guarded("screen_info", "read", async () => undefined, async () => text(JSON.stringify(await helper.call("screen_info"), null, 1))));
 
   server.registerTool("list_windows", {
     title: "List windows",
     description: "List visible top-level windows with hwnd, title, process name, position and size. Call this first to find what to act on. 列出所有可见窗口。",
     inputSchema: {},
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-  }, async () => {
+  }, guarded("list_windows", "read", async () => undefined, async () => {
     const wins = await helper.call<WindowInfo[]>("list_windows");
     return text(wins.map((w) => `${formatWindow(w)} policy=${policy.levelFor(w.process, w.title)}`).join("\n") || "No visible windows.");
-  });
+  }));
 
   server.registerTool("focus_window", {
     title: "Focus window",
@@ -168,7 +177,7 @@ export function registerTools(server: McpServer, deps: Deps): void {
       maxEdge: z.number().int().min(200).max(4000).optional().describe("Max long-edge size in px (default 1280)"),
     },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-  }, guarded("screenshot", "read", async (a) => a.hwnd ? byHwnd(a.hwnd) : undefined, async (a) => {
+  }, guarded("screenshot", "read", async (a) => a.hwnd ? byHwnd(a.hwnd) : fullScreenAllowed(), async (a) => {
     const s = await capture(a.hwnd, a.maxEdge ?? 1280);
     return {
       content: [
@@ -203,7 +212,7 @@ export function registerTools(server: McpServer, deps: Deps): void {
       lang: z.string().optional().describe("OCR language tag such as zh-Hans-CN or en-US; default is the system profile language"),
     },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-  }, guarded("read_screen_text", "read", async (a) => a.hwnd ? byHwnd(a.hwnd) : undefined, async (a, win) => {
+  }, guarded("read_screen_text", "read", async (a) => a.hwnd ? byHwnd(a.hwnd) : fullScreenAllowed(), async (a, win) => {
     const s = await capture(a.hwnd, a.maxEdge ?? 4000);
     const r = await ocr.recognizePng(Buffer.from(s.png_base64, "base64"), a.lang);
     const lines = toScreen(r.lines, s.scale, s.origin);
@@ -309,10 +318,14 @@ export function registerTools(server: McpServer, deps: Deps): void {
     description: "Read text from the clipboard. 读剪贴板。",
     inputSchema: {},
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  }, guarded("clipboard_get", "read", async () => {
+    // the clipboard has no window; treat it as belonging to the app that currently has focus
+    const fg = await foreground().catch(() => undefined);
+    return fg;
   }, async () => {
     const r = await helper.call<{ text: string; hasText: boolean }>("clipboard_get");
     return text(r.hasText ? r.text : "(clipboard has no text)");
-  });
+  }));
 
   // ---------- macros ----------
   const registeredMacros = new Map<string, { remove: () => void }>();
@@ -329,6 +342,8 @@ export function registerTools(server: McpServer, deps: Deps): void {
   }
 
   async function runMacro(m: Macro, params: Record<string, unknown>): Promise<Result> {
+    if (!macros.get(m.name)) { registeredMacros.get(m.name)?.remove(); registeredMacros.delete(m.name); server.sendToolListChanged(); return fail(`macro_${m.name} was deleted (from the control panel); it is no longer available`); }
+    audit.write({ ts: new Date().toISOString(), tool: `macro_${m.name}`, args: redactArgs("macro", params), outcome: "ok", detail: `start, ${m.steps.length} steps`, ms: 0 });
     const lines: string[] = [];
     for (const [i, step] of m.steps.entries()) {
       const h = handlers.get(step.tool);
@@ -391,6 +406,7 @@ export function registerTools(server: McpServer, deps: Deps): void {
     const m: Macro = { name: a.name, description: a.description, params: a.params ?? [], steps, created: new Date().toISOString() };
     try { validateMacro(m); macros.save(m); registerMacro(m); server.sendToolListChanged(); }
     catch (e) { return fail(`save_macro: ${(e as Error).message}`); }
+    audit.write({ ts: new Date().toISOString(), tool: "save_macro", args: { name: m.name, steps: m.steps.length, params: m.params.map((p) => p.name) }, outcome: "ok", ms: 0 });
     return text(`Saved. New tool available: macro_${m.name}\n${formatMacro(m)}`);
   });
 
@@ -406,15 +422,15 @@ export function registerTools(server: McpServer, deps: Deps): void {
     description: "Delete a saved macro. 删除宏。",
     inputSchema: { name: z.string() },
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
-  }, async (a) => { if (!macros.delete(a.name)) return fail(`no macro named ${a.name}`); registeredMacros.get(a.name)?.remove(); registeredMacros.delete(a.name); server.sendToolListChanged(); return text(`Deleted macro_${a.name}.`); });
+  }, async (a) => { if (!macros.delete(a.name)) return fail(`no macro named ${a.name}`); registeredMacros.get(a.name)?.remove(); registeredMacros.delete(a.name); server.sendToolListChanged(); audit.write({ ts: new Date().toISOString(), tool: "delete_macro", args: { name: a.name }, outcome: "ok", ms: 0 }); return text(`Deleted macro_${a.name}.`); });
 
   server.registerTool("clipboard_set", {
     title: "Write clipboard",
     description: "Put text on the clipboard (then press ctrl+v in the target app; good for long or formatted text). 写剪贴板。",
     inputSchema: { text: z.string().max(200000) },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
-  }, async (a) => {
+  }, guarded("clipboard_set", "click", async () => undefined, async (a) => {
     await helper.call("clipboard_set", { text: a.text });
     return text(`Clipboard set (${a.text.length} chars).`);
-  });
+  }));
 }

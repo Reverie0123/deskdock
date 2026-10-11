@@ -43,14 +43,19 @@ export class Helper {
   private ensure(): ChildProcessWithoutNullStreams {
     if (this.proc && this.proc.exitCode === null) return this.proc;
     const p = spawn(this.exe, this.args, { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+    const failAll = (why: string) => { for (const [, pend] of this.pending) { clearTimeout(pend.timer); pend.reject(new HelperError(why)); } this.pending.clear(); if (this.proc === p) this.proc = null; };
+    p.on("error", (e) => failAll(`helper could not start: ${e.message}`));
+    p.stdin.on("error", (e) => failAll(`helper pipe closed: ${e.message}`));
     p.stderr.on("data", (d) => process.stderr.write(`[deskdock-helper] ${d}`));
     const rl = createInterface({ input: p.stdout });
     rl.on("line", (line) => {
-      let msg: { id: number; ok: boolean; result?: unknown; error?: string };
+      let msg: { id: number | null; ok: boolean; result?: unknown; error?: string };
       try { msg = JSON.parse(line); } catch { process.stderr.write(`[deskdock-helper] bad line: ${line.slice(0, 200)}\n`); return; }
-      const pend = this.pending.get(msg.id);
+      // id:null means the helper could not even parse the request; calls are serialized, so it belongs to the oldest pending one
+      const key = msg.id ?? this.pending.keys().next().value;
+      const pend = key === undefined ? undefined : this.pending.get(key);
       if (!pend) return;
-      this.pending.delete(msg.id);
+      this.pending.delete(key as number);
       clearTimeout(pend.timer);
       msg.ok ? pend.resolve(msg.result) : pend.reject(new HelperError(msg.error ?? "unknown helper error"));
     });
@@ -78,7 +83,9 @@ export class Helper {
         try { p.kill(); } catch { /* ignore */ }
       }, timeoutMs);
       this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer });
-      p.stdin.write(JSON.stringify({ id, op, args }) + "\n");
+      // lone surrogates (a cut-off emoji from the model) are not valid JSON for the helper; strip them
+      const line = JSON.stringify({ id, op, args }).replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "�");
+      p.stdin.write(line + "\n");
     });
     const next = this.queue.then(run, run);
     this.queue = next.catch(() => undefined);

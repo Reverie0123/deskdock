@@ -43,6 +43,20 @@ test("policy file is re-read when it changes", async () => {
   writeFileSync(file, JSON.stringify({ ...DEFAULT_POLICY, rules: { ...DEFAULT_POLICY.rules, "notepad.exe": "read" } }));
   assert.equal(store.levelFor("notepad.exe", ""), "read");
   writeFileSync(file, "{ not json");
-  assert.equal(store.levelFor("msedge.exe", ""), "read", "falls back to defaults on a broken file");
+  assert.equal(store.levelFor("notepad.exe", ""), "read", "keeps the last good table on a broken file, never falls back to a looser default");
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("strictest matching rule wins; unknown process is capped at read; keys are lower-cased", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "deskdock-policy-"));
+  const file = path.join(dir, "policy.json");
+  writeFileSync(file, JSON.stringify({ version: 1, default: "full", rules: { "Chrome.EXE": "read", "title:online banking": "block", "title:scratch": "full", "notepad.exe": "click" } }));
+  const store = new PolicyStore(file);
+  assert.equal(store.levelFor("chrome.exe", "My Online Banking - Chrome"), "block", "title rule must still apply inside a browser");
+  assert.equal(store.levelFor("chrome.exe", "news"), "read", "upper-case key in the file still matches");
+  assert.equal(store.levelFor("notepad.exe", "scratch.txt"), "click", "a looser title rule cannot widen a process rule");
+  assert.equal(store.levelFor("", "Some system window"), "read", "no process name: never more than read");
+  assert.equal(store.levelFor("", "online banking"), "block");
+  assert.equal(store.levelFor("other.exe", "anything"), "full");
   rmSync(dir, { recursive: true, force: true });
 });

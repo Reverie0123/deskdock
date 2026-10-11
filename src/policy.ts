@@ -27,12 +27,15 @@ export const DEFAULT_POLICY: Policy = {
     "1password.exe": "block", "bitwarden.exe": "block", "keepass.exe": "block", "keepassxc.exe": "block",
     "alipay.exe": "block", "alipaysecsvc.exe": "block", "wechatpay.exe": "block",
     "title:网上银行": "block", "title:online banking": "block", "title:密码管理": "block",
+    // the Win+R Run box lives in explorer.exe: let the model see it but not type a command into it
+    "title:运行": "click",
     // ourselves and the OS security surface
     "logonui.exe": "block", "consent.exe": "block", "credentialuihost.exe": "block",
   },
 };
 
 export function policyDir(): string {
+  if (process.env.DESKDOCK_HOME) return process.env.DESKDOCK_HOME; // tests and portable installs
   return path.join(process.env.APPDATA ?? path.join(process.env.USERPROFILE ?? ".", "AppData", "Roaming"), "deskdock");
 }
 export function policyPath(): string { return path.join(policyDir(), "policy.json"); }
@@ -58,26 +61,38 @@ export class PolicyStore {
       const st = statSync(this.filePath);
       if (st.mtimeMs !== this.mtime) {
         const raw = JSON.parse(readFileSync(this.filePath, "utf8")) as Partial<Policy>;
-        this.cached = { version: 1, default: raw.default ?? "full", rules: raw.rules ?? {} };
+        const rules: Record<string, Level> = {};
+        for (const [k, v] of Object.entries(raw.rules ?? {})) if (LEVELS.includes(v as Level)) rules[k.trim().toLowerCase()] = v as Level;
+        this.cached = { version: 1, default: LEVELS.includes(raw.default as Level) ? (raw.default as Level) : "full", rules };
         this.mtime = st.mtimeMs;
       }
-    } catch { this.cached = DEFAULT_POLICY; }
+    } catch {
+      // a torn write (editor saving, panel PUT in flight) or a missing file: keep the last good table rather than
+      // falling back to something more permissive than what the user configured
+      if (this.mtime === 0) this.cached = DEFAULT_POLICY;
+    }
     return this.cached;
   }
 
+  /** The strictest of every matching rule (process name and any title: substring); default when nothing matches.
+   *  A window whose process cannot be identified (protected/system process) is capped at read. */
   levelFor(processName: string, title: string): Level {
     const p = this.get();
     const proc = processName.toLowerCase();
-    if (proc && p.rules[proc]) return p.rules[proc];
     const t = title.toLowerCase();
+    let level: Level | undefined = proc ? p.rules[proc] : undefined;
     for (const [k, v] of Object.entries(p.rules)) {
-      if (k.startsWith("title:") && t.includes(k.slice(6).toLowerCase())) return v;
+      if (k.startsWith("title:") && k.length > 6 && t.includes(k.slice(6))) level = level === undefined ? v : strictest(level, v);
     }
-    return p.default;
+    if (level === undefined) level = p.default;
+    if (!proc) level = strictest(level, "read");
+    return level;
   }
 }
 
+const LEVELS: Level[] = ["block", "read", "click", "full"];
 const RANK: Record<Level, number> = { block: 0, read: 1, click: 2, full: 3 };
+export function strictest(a: Level, b: Level): Level { return RANK[a] <= RANK[b] ? a : b; }
 const NEEDED: Record<Action, number> = { read: 1, click: 2, type: 3 };
 
 export interface Decision { allowed: boolean; level: Level; reason?: string }

@@ -52,6 +52,7 @@ function usage(lang: "zh" | "en"): string {
   deskdock setup --remove   从上述配置中移除
   deskdock setup --dry-run  只显示将要做的改动，不写文件
   deskdock policy       显示权限表文件位置
+  deskdock panel        打开本地控制面板（权限、日志回放、宏）
   deskdock --help`
     : `DeskDock ${VERSION}: let Claude, Cursor or any model safely operate any Windows app.
 
@@ -61,6 +62,7 @@ Usage:
   deskdock setup --remove   remove it again
   deskdock setup --dry-run  show what would change without writing
   deskdock policy       print the policy file location
+  deskdock panel        open the local control panel (permissions, log replay, macros)
   deskdock --help`;
 }
 

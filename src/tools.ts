@@ -5,6 +5,7 @@ import { Helper, HelperError, type Screenshot, type Snapshot, type UiaNode, type
 import { decide, isPaused, PolicyStore, type Action } from "./policy.js";
 import { Audit, redactArgs } from "./audit.js";
 import { Ocr, toScreen, formatOcr } from "./ocr.js";
+import { MacroStore, substitute, formatMacro, validateMacro, MACRO_NAME, type Macro, type MacroStep, type MacroTarget } from "./macros.js";
 
 type Content = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
 type Result = { content: Content[]; isError?: boolean };
@@ -12,7 +13,7 @@ type Result = { content: Content[]; isError?: boolean };
 const text = (t: string): Result => ({ content: [{ type: "text", text: t }] });
 const fail = (t: string): Result => ({ content: [{ type: "text", text: t }], isError: true });
 
-export interface Deps { helper: Helper; policy: PolicyStore; audit: Audit; ocr: Ocr }
+export interface Deps { helper: Helper; policy: PolicyStore; audit: Audit; ocr: Ocr; macros: MacroStore }
 
 const CLASS_LABELS: Record<string, string> = {
   Shell_TrayWnd: "Taskbar", Shell_SecondaryTrayWnd: "Taskbar (secondary monitor)", NotifyIconOverflowWindow: "Tray overflow",
@@ -49,7 +50,11 @@ function formatNode(n: UiaNode): string {
 }
 
 export function registerTools(server: McpServer, deps: Deps): void {
-  const { helper, policy, audit, ocr } = deps;
+  const { helper, policy, audit, ocr, macros } = deps;
+  /** every guarded tool handler by name, so macros can replay them through the same policy + audit path */
+  const handlers = new Map<string, (args: Record<string, unknown>) => Promise<Result>>();
+  /** this session's successful calls, newest last, with resolved targets for ref-based steps (for save_macro fromLast) */
+  const history: MacroStep[] = [];
 
   async function targetAt(x: number, y: number): Promise<WindowInfo> { return helper.call<WindowInfo>("window_at", { x, y }); }
   async function foreground(): Promise<WindowInfo> { return helper.call<WindowInfo>("foreground_window"); }
@@ -78,7 +83,7 @@ export function registerTools(server: McpServer, deps: Deps): void {
     target: (args: A) => Promise<WindowInfo | undefined>,
     body: (args: A, win: WindowInfo | undefined) => Promise<Result>,
   ) {
-    return async (args: A): Promise<Result> => {
+    const fn = async (args: A): Promise<Result> => {
       const t0 = Date.now();
       let win: WindowInfo | undefined;
       try {
@@ -95,8 +100,17 @@ export function registerTools(server: McpServer, deps: Deps): void {
             return fail(d.reason!);
           }
         }
+        let macroTarget: MacroTarget | undefined;
+        if (typeof args.ref === "number") {
+          try {
+            const info = await helper.call<{ window: WindowInfo; node: UiaNode }>("ref_node", { ref: args.ref }, 6000);
+            // window titles usually carry the document name, so they are not recorded; the user can add target.title by hand
+            macroTarget = { process: info.window.process, name: info.node.name || undefined, type: info.node.type, automationId: info.node.automationId };
+          } catch { /* ref gone: step is recorded without a target and cannot be replayed */ }
+        }
         const r = await body(args, win);
         audit.write({ ts: new Date().toISOString(), tool, args: redactArgs(tool, args), target: win && { process: win.process, title: win.title, hwnd: win.hwnd }, outcome: "ok", ms: Date.now() - t0 });
+        if (!r.isError && !READ_ONLY_TOOLS.has(tool)) { history.push({ tool, args: { ...args }, target: macroTarget }); if (history.length > 500) history.shift(); }
         return r;
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -104,7 +118,10 @@ export function registerTools(server: McpServer, deps: Deps): void {
         return fail(`${tool} failed: ${msg}`);
       }
     };
+    handlers.set(tool, fn as (args: Record<string, unknown>) => Promise<Result>);
+    return fn;
   }
+  const READ_ONLY_TOOLS = new Set(["screenshot", "read_window", "read_screen_text", "list_windows", "screen_info", "clipboard_get"]);
 
   server.registerTool("screen_info", {
     title: "Screen info",
@@ -296,6 +313,100 @@ export function registerTools(server: McpServer, deps: Deps): void {
     const r = await helper.call<{ text: string; hasText: boolean }>("clipboard_get");
     return text(r.hasText ? r.text : "(clipboard has no text)");
   });
+
+  // ---------- macros ----------
+  const registeredMacros = new Map<string, { remove: () => void }>();
+
+  async function resolveTarget(t: MacroTarget): Promise<number> {
+    const wins = await helper.call<WindowInfo[]>("list_windows");
+    const byProc = wins.filter((w) => !t.process || w.process.toLowerCase() === t.process.toLowerCase());
+    const cands = t.title ? byProc.filter((w) => w.title.includes(t.title!)) : byProc;
+    const pool = cands.length ? cands : byProc; // title is a hint, not a requirement
+    const win = pool.find((w) => w.focused) ?? pool.find((w) => !w.minimized) ?? pool[0];
+    if (!win) throw new Error(`no window for ${t.process ?? ""} ${t.title ? JSON.stringify(t.title) : ""}; open the app first`);
+    const found = await helper.call<{ node: UiaNode }>("uia_find", { hwnd: win.hwnd, name: t.name ?? "", nameContains: t.nameContains ?? false, type: t.type ?? "", automationId: t.automationId ?? "" }, 8000);
+    return found.node.ref;
+  }
+
+  async function runMacro(m: Macro, params: Record<string, unknown>): Promise<Result> {
+    const lines: string[] = [];
+    for (const [i, step] of m.steps.entries()) {
+      const h = handlers.get(step.tool);
+      if (!h) return fail(`step ${i + 1}: unknown tool ${step.tool}`);
+      let args = substitute({ ...step.args }, params) as Record<string, unknown>;
+      try {
+        if (step.target) { delete args.x; delete args.y; args = { ...args, ref: await resolveTarget(substitute(step.target, params)) }; }
+      } catch (e) { return fail([...lines, `step ${i + 1} (${step.tool}): ${(e as Error).message}`, "Macro stopped."].join("\n")); }
+      const r = await h(args);
+      const txt = r.content.find((c) => c.type === "text")?.text ?? "";
+      lines.push(`${i + 1}. ${step.tool}: ${txt.split("\n")[0].slice(0, 160)}`);
+      if (r.isError) return fail([...lines, `Macro stopped at step ${i + 1}.`].join("\n"));
+      await new Promise((res) => setTimeout(res, step.waitMs ?? 250));
+    }
+    return text([`macro_${m.name} finished (${m.steps.length} steps).`, ...lines].join("\n"));
+  }
+
+  function registerMacro(m: Macro): void {
+    registeredMacros.get(m.name)?.remove();
+    const shape: Record<string, z.ZodTypeAny> = {};
+    for (const p of m.params) shape[p.name] = z.string().describe(p.description ?? p.name);
+    const reg = server.registerTool(`macro_${m.name}`, {
+      title: `Macro: ${m.name}`,
+      description: `${m.description || "User-recorded macro"} (${m.steps.length} steps; recorded on this machine, replayed through the same permission checks). 用户录制的宏。`,
+      inputSchema: shape,
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+    }, async (args: Record<string, unknown>) => runMacro(m, args));
+    registeredMacros.set(m.name, reg);
+  }
+  for (const m of macros.list()) { try { registerMacro(m); } catch (e) { process.stderr.write(`[deskdock] macro ${m.name} not registered: ${(e as Error).message}\n`); } }
+
+  server.registerTool("list_macros", {
+    title: "List macros",
+    description: "List saved macros with their parameters and steps. Each macro is also available as a tool named macro_<name>. 列出已保存的宏。",
+    inputSchema: {},
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  }, async () => { const all = macros.list(); return text(all.length ? all.map(formatMacro).join("\n\n") : "No macros saved yet. Use save_macro after completing a task you will repeat."); });
+
+  server.registerTool("save_macro", {
+    title: "Save macro",
+    description: "Save a sequence of tool calls as a reusable macro, exposed immediately as the tool macro_<name>. Either pass steps explicitly, or fromLast=N to take the last N successful actions of this session (ref clicks are stored as stable control descriptions). Use {{param}} placeholders in args and declare them in params. 把一串操作存成宏。",
+    inputSchema: {
+      name: z.string().regex(MACRO_NAME).describe("lower_snake_case, e.g. wechat_send"),
+      description: z.string().max(300),
+      fromLast: z.number().int().min(1).max(200).optional().describe("Take the last N successful non-read actions of this session"),
+      steps: z.array(z.object({ tool: z.string(), args: z.record(z.string(), z.unknown()).default({}), target: z.object({ process: z.string().optional(), title: z.string().optional(), name: z.string().optional(), nameContains: z.boolean().optional(), type: z.string().optional(), automationId: z.string().optional() }).optional(), waitMs: z.number().int().min(0).max(30000).optional() })).optional(),
+      params: z.array(z.object({ name: z.string(), description: z.string().optional() })).optional(),
+      replace: z.record(z.string(), z.string()).optional().describe("Literal text -> {{param}}: replaces that text in recorded args so the macro takes it as a parameter"),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  }, async (a) => {
+    let steps: MacroStep[] = a.steps ? (a.steps as MacroStep[]) : history.slice(-(a.fromLast ?? 0));
+    if (!a.steps && !a.fromLast) return fail("give steps or fromLast");
+    if (steps.length === 0) return fail("nothing to save: no successful actions recorded in this session yet");
+    if (a.replace) {
+      let json = JSON.stringify(steps);
+      for (const [literal, param] of Object.entries(a.replace)) json = json.split(JSON.stringify(literal).slice(1, -1)).join(`{{${param}}}`);
+      steps = JSON.parse(json);
+    }
+    const m: Macro = { name: a.name, description: a.description, params: a.params ?? [], steps, created: new Date().toISOString() };
+    try { validateMacro(m); macros.save(m); registerMacro(m); server.sendToolListChanged(); }
+    catch (e) { return fail(`save_macro: ${(e as Error).message}`); }
+    return text(`Saved. New tool available: macro_${m.name}\n${formatMacro(m)}`);
+  });
+
+  server.registerTool("run_macro", {
+    title: "Run macro",
+    description: "Run a saved macro by name with parameters (same as calling macro_<name>). 运行宏。",
+    inputSchema: { name: z.string(), params: z.record(z.string(), z.unknown()).optional() },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+  }, async (a) => { const m = macros.get(a.name); if (!m) return fail(`no macro named ${a.name}`); return runMacro(m, a.params ?? {}); });
+
+  server.registerTool("delete_macro", {
+    title: "Delete macro",
+    description: "Delete a saved macro. 删除宏。",
+    inputSchema: { name: z.string() },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+  }, async (a) => { if (!macros.delete(a.name)) return fail(`no macro named ${a.name}`); registeredMacros.get(a.name)?.remove(); registeredMacros.delete(a.name); server.sendToolListChanged(); return text(`Deleted macro_${a.name}.`); });
 
   server.registerTool("clipboard_set", {
     title: "Write clipboard",

@@ -514,6 +514,73 @@ static json refWindow(const json& a) {
     if (!IsWindow(e.hwnd)) throw std::runtime_error("window closed");
     return windowJson(e.hwnd);
 }
+static CONTROLTYPEID controlTypeFromName(const std::string& n) {
+    for (int id = 50000; id <= 50040; id++) if (n == controlTypeName(id)) return id;
+    return 0;
+}
+static json nodeOf(IUIAutomationElement* el, HWND hwnd, int depth) {
+    BSTR name = nullptr, aid = nullptr; CONTROLTYPEID ct = 0; RECT rc{}; BOOL enabled = TRUE, offscreen = FALSE, focusable = FALSE;
+    el->get_CurrentName(&name); el->get_CurrentAutomationId(&aid); el->get_CurrentControlType(&ct); el->get_CurrentBoundingRectangle(&rc);
+    el->get_CurrentIsEnabled(&enabled); el->get_CurrentIsOffscreen(&offscreen); el->get_CurrentIsKeyboardFocusable(&focusable);
+    int ref; { std::lock_guard<std::mutex> lk(g_refMutex); ref = g_nextRef++; g_refs[ref] = { runtimeIdOf(el), hwnd, rc }; }
+    json node = {{"ref", ref}, {"depth", depth}, {"type", controlTypeName(ct)}, {"name", b2u(name)}, {"rect", rectJson(rc)}};
+    if (!enabled) node["enabled"] = false;
+    if (offscreen) node["offscreen"] = true;
+    if (focusable) node["focusable"] = true;
+    std::string a = b2u(aid); if (!a.empty()) node["automationId"] = a;
+    IUIAutomationValuePattern* vp = nullptr; el->GetCurrentPatternAs(UIA_ValuePatternId, __uuidof(IUIAutomationValuePattern), (void**)&vp);
+    if (vp) { BSTR v = nullptr; vp->get_CurrentValue(&v); std::string vs = b2u(v); if (!vs.empty()) node["value"] = vs.size() > 2000 ? vs.substr(0, 2000) + "..." : vs; if (v) SysFreeString(v); vp->Release(); }
+    if (name) SysFreeString(name);
+    if (aid) SysFreeString(aid);
+    return node;
+}
+// Find one control in a window by name / type / automationId (used by macros, where refs from an old snapshot are gone).
+static json uiaFind(const json& a) {
+    HWND h = hwndArg(a); if (!h) h = GetForegroundWindow();
+    std::string name = a.value("name", ""), type = a.value("type", ""), aid = a.value("automationId", "");
+    bool contains = a.value("nameContains", false);
+    int timeoutMs = a.value("timeoutMs", 4000);
+    if (name.empty() && type.empty() && aid.empty()) throw std::runtime_error("give name, type or automationId");
+    return withTimeout([=]() {
+        ComPtrUA ua;
+        if (isChromiumWindow(h)) knockChromium(h);
+        std::vector<IUIAutomationCondition*> conds;
+        if (!type.empty()) { CONTROLTYPEID ct = controlTypeFromName(type); if (!ct) throw std::runtime_error("unknown control type: " + type); VARIANT v; v.vt = VT_I4; v.lVal = ct; IUIAutomationCondition* c = nullptr; ua.p->CreatePropertyCondition(UIA_ControlTypePropertyId, v, &c); conds.push_back(c); }
+        if (!aid.empty()) { std::wstring w = u2w(aid); VARIANT v; v.vt = VT_BSTR; v.bstrVal = SysAllocString(w.c_str()); IUIAutomationCondition* c = nullptr; ua.p->CreatePropertyCondition(UIA_AutomationIdPropertyId, v, &c); SysFreeString(v.bstrVal); conds.push_back(c); }
+        if (!name.empty() && !contains) { std::wstring w = u2w(name); VARIANT v; v.vt = VT_BSTR; v.bstrVal = SysAllocString(w.c_str()); IUIAutomationCondition* c = nullptr; ua.p->CreatePropertyCondition(UIA_NamePropertyId, v, &c); SysFreeString(v.bstrVal); conds.push_back(c); }
+        IUIAutomationCondition* cond = nullptr;
+        if (conds.empty()) ua.p->CreateTrueCondition(&cond);
+        else if (conds.size() == 1) cond = conds[0];
+        else { SAFEARRAY* sa = SafeArrayCreateVector(VT_UNKNOWN, 0, (ULONG)conds.size()); for (LONG i = 0; i < (LONG)conds.size(); i++) SafeArrayPutElement(sa, &i, conds[i]); ua.p->CreateAndConditionFromArray(sa, &cond); SafeArrayDestroy(sa); for (auto c : conds) c->Release(); }
+        std::vector<HWND> roots{ h }; for (HWND rc : renderChildren(h)) roots.push_back(rc);
+        json best = nullptr, fallback = nullptr; int checked = 0;
+        for (HWND root_hwnd : roots) {
+            IUIAutomationElement* root = nullptr; if (FAILED(ua.p->ElementFromHandle(root_hwnd, &root)) || !root) continue;
+            IUIAutomationElementArray* arr = nullptr; root->FindAll(TreeScope_Subtree, cond, &arr);
+            if (arr) {
+                int n = 0; arr->get_Length(&n);
+                for (int i = 0; i < n && best.is_null(); i++) {
+                    IUIAutomationElement* e = nullptr; arr->GetElement(i, &e); if (!e) continue; checked++;
+                    BSTR nm = nullptr; e->get_CurrentName(&nm); std::string ns = b2u(nm); if (nm) SysFreeString(nm);
+                    bool ok = name.empty() || (contains ? ns.find(name) != std::string::npos : ns == name);
+                    if (ok) { json node = nodeOf(e, root_hwnd, 0); if (node.value("offscreen", false)) { if (fallback.is_null()) fallback = node; } else best = node; }
+                    e->Release();
+                }
+                arr->Release();
+            }
+            root->Release();
+            if (!best.is_null()) break;
+        }
+        cond->Release();
+        if (best.is_null()) best = fallback;
+        if (best.is_null()) throw std::runtime_error("no control matched (checked " + std::to_string(checked) + " candidates)");
+        return json{{"window", windowJson(h)}, {"node", best}};
+    }, timeoutMs);
+}
+static json refNode(const json& a) {
+    int ref = a.at("ref"); int timeoutMs = a.value("timeoutMs", 4000);
+    return withTimeout([=]() { ComPtrUA ua; RefEntry e; IUIAutomationElement* el = findByRef(ua.p, ref, e); json n = nodeOf(el, e.hwnd, 0); el->Release(); return json{{"window", windowJson(e.hwnd)}, {"node", n}}; }, timeoutMs);
+}
 static json uiaAction(const json& a, const std::string& action) {
     int ref = a.at("ref"); int timeoutMs = a.value("timeoutMs", 4000);
     std::string text = a.value("text", "");
@@ -566,6 +633,8 @@ static json dispatch(const std::string& op, const json& a) {
     if (op == "clipboard_set") return clipboardSet(a);
     if (op == "uia_snapshot") return uiaSnapshot(a);
     if (op == "ref_window") return refWindow(a);
+    if (op == "uia_find") return uiaFind(a);
+    if (op == "ref_node") return refNode(a);
     if (op == "uia_click") return uiaAction(a, "click");
     if (op == "uia_focus") return uiaAction(a, "focus");
     if (op == "uia_set_value") return uiaAction(a, "setValue");

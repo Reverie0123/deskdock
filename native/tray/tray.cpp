@@ -96,7 +96,8 @@ static LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case ID_EXIT: DestroyWindow(hwnd); break;
         }
         return 0;
-    case WM_DESTROY: Shell_NotifyIconW(NIM_DELETE, &g_nid); PostQuitMessage(0); return 0;
+    case WM_TIMER: { static bool last = false; bool now = isPaused(); if (now != last) { last = now; updateTip(); } return 0; }
+    case WM_DESTROY: KillTimer(hwnd, 1); Shell_NotifyIconW(NIM_DELETE, &g_nid); PostQuitMessage(0); return 0;
     }
     if (msg == RegisterWindowMessageW(L"TaskbarCreated")) { Shell_NotifyIconW(NIM_ADD, &g_nid); updateTip(); return 0; } // explorer restarted
     return DefWindowProcW(hwnd, msg, wp, lp);
@@ -112,6 +113,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_SHOWTIP; g_nid.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
     wcsncpy(g_nid.szTip, g_zh ? L"DeskDock 桌面扩展坞" : L"DeskDock", 127); // the tip doubles as the accessible name of the icon
     Shell_NotifyIconW(NIM_ADD, &g_nid); Shell_NotifyIconW(NIM_SETVERSION, &g_nid); updateTip();
+    SetTimer(hwnd, 1, 2000, nullptr); // the paused marker can be changed by the panel or scripts; keep the icon in sync
     MSG m; while (GetMessageW(&m, nullptr, 0, 0) > 0) { TranslateMessage(&m); DispatchMessageW(&m); }
     ReleaseMutex(mutex); CloseHandle(mutex);
     return 0;

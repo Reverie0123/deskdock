@@ -8,16 +8,18 @@ import { Audit } from "./audit.js";
 import { registerTools } from "./tools.js";
 import { Ocr } from "./ocr.js";
 import { startPanel } from "./panel.js";
+import { MacroStore } from "./macros.js";
 import { spawn } from "node:child_process";
 import { runSetup, formatResults } from "./setup.js";
 
 const VERSION = "0.1.0";
 
-export function createServer(deps?: { helper?: Helper; policy?: PolicyStore; audit?: Audit; ocr?: Ocr }): { server: McpServer; helper: Helper; ocr: Ocr } {
+export function createServer(deps?: { helper?: Helper; policy?: PolicyStore; audit?: Audit; ocr?: Ocr; macros?: MacroStore }): { server: McpServer; helper: Helper; ocr: Ocr } {
   const helper = deps?.helper ?? new Helper();
   const policy = deps?.policy ?? new PolicyStore();
   const audit = deps?.audit ?? new Audit();
   const ocr = deps?.ocr ?? new Ocr();
+  const macros = deps?.macros ?? new MacroStore();
   const server = new McpServer(
     { name: "deskdock", version: VERSION },
     {
@@ -27,10 +29,11 @@ export function createServer(deps?: { helper?: Helper; policy?: PolicyStore; aud
         "Refs from read_window expire on the next read_window. Coordinates are physical screen pixels.",
         `Some apps are read-only or blocked by the user's policy (${policyPath()}); when a tool is denied, tell the user plainly and ask them to do that step.`,
         "Never type passwords or payment details; ask the user to enter those themselves.",
+        "After finishing a task the user is likely to repeat, offer to save it with save_macro(fromLast=N); saved macros appear as macro_<name> tools.",
       ].join(" "),
     },
   );
-  registerTools(server, { helper, policy, audit, ocr });
+  registerTools(server, { helper, policy, audit, ocr, macros });
   return { server, helper, ocr };
 }
 

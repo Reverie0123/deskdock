@@ -31,6 +31,8 @@ export const DEFAULT_POLICY: Policy = {
     "title=运行": "click", "title=run": "click",
     // ourselves and the OS security surface
     "logonui.exe": "block", "consent.exe": "block", "credentialuihost.exe": "block",
+    // the model must not edit its own permission table: any window showing the policy file or the control panel is read-only
+    "title:policy.json": "read", "title:deskdock": "read",
   },
 };
 

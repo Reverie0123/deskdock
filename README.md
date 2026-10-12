@@ -53,6 +53,10 @@ One command finds the AI clients installed on this machine and adds DeskDock to 
 
 The usual flow the model follows: `list_windows` → `focus_window` → `read_window` → `click` / `type` → `read_window` again to verify. All coordinates are physical screen pixels.
 
+## Privacy in one paragraph
+
+DeskDock never connects to the network. Everything it reads (window text, screenshots, OCR, clipboard) goes to **your AI client and from there to the model provider you configured**; that is the only place your data leaves the machine. A `read` level still lets the model see an app; use `block` for anything it must not look at. Screen content is labelled as data, not instructions, but prompt injection through web pages and messages remains a risk of every desktop agent. Full details, verification steps and the binary build pipeline: [PRIVACY.md](PRIVACY.md).
+
 ## Permissions
 
 The policy lives at `%APPDATA%\deskdock\policy.json` (run `deskdock policy` to print the path). It is created on first run and re-read whenever it changes.

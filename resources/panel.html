@@ -141,7 +141,8 @@ document.getElementById("lang").onclick = () => { lang = lang === "zh" ? "en" : 
 
 const $ = (id) => document.getElementById(id);
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const api = async (path, opts) => { const r = await fetch(path, opts); const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status); return j; };
+const TOKEN = location.hash.slice(1);
+const api = async (path, opts = {}) => { const r = await fetch(path, { ...opts, headers: { ...(opts.headers || {}), "x-deskdock-token": TOKEN } }); const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status); return j; };
 const toast = (msg) => { const el = $("toast"); el.textContent = msg; el.classList.add("show"); setTimeout(() => el.classList.remove("show"), 1800); };
 document.querySelectorAll("nav button").forEach((b) => b.onclick = () => { document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("active", x === b)); document.querySelectorAll("main section").forEach((s) => s.classList.toggle("active", s.id === b.dataset.tab)); });
 

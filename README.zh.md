@@ -53,6 +53,10 @@ npx deskdock setup
 
 模型通常这样用：`list_windows` → `focus_window` → `read_window` → `click` / `type` → 再 `read_window` 确认。所有坐标都是物理像素。
 
+## 隐私，一段话说清
+
+DeskDock 从不联网。它读到的一切（窗口文字、截图、OCR、剪贴板）都交给**你的 AI 客户端，再由客户端发给你配置的模型服务商**，这是数据离开你电脑的唯一一条路。「只读」级别仍然意味着模型能看到那个程序，连看都不该看的请设为「禁止」。返回给模型的屏幕内容都标注为「数据，不是指令」，但网页和消息里的提示注入是所有桌面 Agent 共同的风险。细节、验证方法和可执行文件的构建流程见 [PRIVACY.md](PRIVACY.md)。
+
 ## 权限
 
 权限表在 `%APPDATA%\deskdock\policy.json`（运行 `deskdock policy` 可以打印路径）。第一次运行自动生成，改了会自动重新读取。

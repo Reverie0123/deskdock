@@ -1,0 +1,61 @@
+name: build
+
+# Reproducible build of the native helpers on a clean GitHub-hosted Windows runner, plus the read-only test suite.
+# The SHA-256 of every shipped binary is printed in the job log and attached as an artifact, so anyone can compare
+# them with the files in a release.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install MinGW-w64 (WinLibs, same toolchain family as the dev machine)
+        shell: pwsh
+        run: |
+          choco install mingw --version=13.2.0 -y --no-progress
+          echo "C:\ProgramData\mingw64\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+          g++ --version
+
+      - name: Fetch nlohmann/json single header
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force native/helper | Out-Null
+          Invoke-WebRequest https://github.com/nlohmann/json/releases/latest/download/json.hpp -OutFile native/helper/json.hpp
+
+      - name: Build native helpers from source
+        shell: pwsh
+        run: |
+          npm run build:helper
+          npm run build:tray
+
+      - name: Install, build and test
+        shell: pwsh
+        run: |
+          npm ci
+          npm run build
+          npm test
+
+      - name: Hashes of shipped files
+        shell: pwsh
+        run: |
+          Get-FileHash resources/deskdock-helper.exe, resources/deskdock-tray.exe -Algorithm SHA256 | Format-Table Hash, Path -AutoSize | Tee-Object -FilePath hashes.txt
+          Get-Content hashes.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deskdock-native-${{ github.sha }}
+          path: |
+            resources/deskdock-helper.exe
+            resources/deskdock-tray.exe
+            hashes.txt

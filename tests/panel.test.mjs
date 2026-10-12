@@ -19,8 +19,17 @@ test("panel api: status, policy round-trip, logs", async () => {
   ].join("\n") + "\n");
   const policy = new PolicyStore(policyFile); policy.ensureFile();
   const panel = await startPanel({ policy, version: "test", logsDir: logs, writeInfo: false });
+  const token = panel.url.split("#")[1];
+  const base = panel.url.split("#")[0];
+  const fetch0 = globalThis.fetch;
+  const fetch = (u, o = {}) => fetch0(u.replace(panel.url, base), { ...o, headers: { ...(o.headers || {}), "x-deskdock-token": token } });
   try {
-    const html = await (await fetch(panel.url)).text();
+    assert.equal((await fetch0(base + "api/status")).status, 401, "API without the token is refused");
+    // fetch cannot override Host; use a raw request to simulate DNS rebinding
+    const { request } = await import("node:http");
+    const hostStatus = await new Promise((resolve) => { const r = request(base + "api/status", { headers: { host: "evil.example", "x-deskdock-token": token } }, (res) => { res.resume(); resolve(res.statusCode); }); r.end(); });
+    assert.equal(hostStatus, 403, "wrong Host is refused even with the token");
+    const html = await (await fetch0(base)).text();
     assert.match(html, /<title>DeskDock<\/title>/);
 
     const status = await (await fetch(panel.url + "api/status")).json();

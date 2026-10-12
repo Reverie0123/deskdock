@@ -1,6 +1,7 @@
 // Local control panel: a tiny HTTP server on 127.0.0.1 serving resources/panel.html and a JSON API over the
 // policy file and the audit logs. No framework, no dependencies; the tray app and `deskdock panel` open it in the browser.
 import http from "node:http";
+import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, readdirSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -52,6 +53,9 @@ export interface PanelHandle { port: number; url: string; close: () => void }
 export function startPanel(opts: { policy: PolicyStore; port?: number; version: string; logsDir?: string; writeInfo?: boolean; macros?: MacroStore }): Promise<PanelHandle> {
   const html = readFileSync(panelHtmlPath(), "utf8");
   const logs = opts.logsDir ?? defaultLogsDir();
+  // Other local users and local programs can reach 127.0.0.1 too; a token in the URL (written to panel.json for the
+  // tray) keeps the API to whoever was handed the link.
+  const token = randomBytes(16).toString("hex");
   const macros = opts.macros ?? new MacroStore();
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
@@ -62,6 +66,7 @@ export function startPanel(opts: { policy: PolicyStore; port?: number; version: 
     const json = (code: number, v: unknown) => send(code, JSON.stringify(v));
     try {
       if (req.method === "GET" && url.pathname === "/") return send(200, html, "text/html; charset=utf-8");
+      if (url.pathname.startsWith("/api/") && req.headers["x-deskdock-token"] !== token) return json(401, { error: "missing or wrong token; open the panel through its full link (deskdock panel, or the tray icon)" });
       if (req.method === "GET" && url.pathname === "/api/status") {
         const today = new Date().toISOString().slice(0, 10);
         const entries = readLog(today, logs) as { outcome?: string }[];
@@ -102,7 +107,7 @@ export function startPanel(opts: { policy: PolicyStore; port?: number; version: 
     server.listen(opts.port ?? 0, "127.0.0.1", () => {
       const addr = server.address();
       const port = typeof addr === "object" && addr ? addr.port : (opts.port ?? 0);
-      const url = `http://127.0.0.1:${port}/`;
+      const url = `http://127.0.0.1:${port}/#${token}`;
       if (opts.writeInfo !== false) try { mkdirSync(policyDir(), { recursive: true }); writeFileSync(path.join(policyDir(), "panel.json"), JSON.stringify({ port, url, pid: process.pid, started: new Date().toISOString() }), "utf8"); } catch { /* ignore */ }
       resolve({ port, url, close: () => server.close() });
     });

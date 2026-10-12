@@ -17,6 +17,9 @@ test("default levels by process name and title", () => {
   assert.equal(store.levelFor("notepad.exe", "Untitled"), "full");
   assert.equal(store.levelFor("1password.exe", ""), "block");
   assert.equal(store.levelFor("someapp.exe", "我的网上银行 - 登录"), "block", "title rule");
+  assert.equal(store.levelFor("notepad.exe", "policy.json - Notepad"), "read", "the model cannot edit its own permission table");
+  assert.equal(store.levelFor("chrome.exe", "DeskDock"), "read", "nor use the control panel through a browser");
+  assert.equal(store.levelFor("firefox.exe", "DeskDock"), "read");
   rmSync(dir, { recursive: true, force: true });
 });
 

@@ -75,6 +75,7 @@ Filename: "{app}\deskdock.cmd"; Parameters: "panel"; Description: "{cm:OpenPanel
 [UninstallDelete]
 Type: files; Name: "{app}\.nosetup"
 Type: filesandordirs; Name: "{app}\node_modules"
+Type: dirifempty; Name: "{app}"
 
 [UninstallRun]
 Filename: "{app}\deskdock.cmd"; Parameters: "setup --remove"; Flags: runhidden waituntilterminated; RunOnceId: "removeclients"; Check: not NoSetupMarker
@@ -88,6 +89,26 @@ var
 function Found(Path: String): Boolean;
 begin
   Result := DirExists(Path) or FileExists(Path);
+end;
+
+// Microsoft Store apps live under %LOCALAPPDATA%\Packages\<Name>_<publisher id>
+function StorePackageExists(PackagesDir, Prefix: String): Boolean;
+var
+  FindRec: TFindRec;
+begin
+  Result := False;
+  if FindFirst(PackagesDir + '\' + Prefix + '*', FindRec) then
+  begin
+    try
+      repeat
+        if (FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0 then
+          if DirExists(PackagesDir + '\' + FindRec.Name + '\LocalCache\Roaming\Claude') then
+            Result := True;
+      until Result or not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
 end;
 
 function NoSetup: Boolean;
@@ -124,7 +145,7 @@ begin
   ClientIds[4] := 'cline-cursor';   Labels[4] := 'Cline (Cursor)';
   ClientIds[5] := 'windsurf';       Labels[5] := 'Windsurf';
   Present[0] := Found(UserHome + '\.claude') or Found(Local + '\AnthropicClaude') or Found(AppData + '\npm\claude.cmd');
-  Present[1] := Found(AppData + '\Claude');
+  Present[1] := Found(AppData + '\Claude\claude_desktop_config.json') or Found(AppData + '\Claude\config.json') or StorePackageExists(Local + '\Packages', 'Claude_');
   Present[2] := Found(UserHome + '\.cursor') or Found(Local + '\Programs\cursor');
   Present[3] := Found(AppData + '\Code\User\globalStorage\saoudrizwan.claude-dev');
   Present[4] := Found(AppData + '\Cursor\User\globalStorage\saoudrizwan.claude-dev');

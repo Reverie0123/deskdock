@@ -1,5 +1,5 @@
 // `deskdock setup`: write DeskDock into each installed MCP client's config. `--remove` undoes it, `--dry-run` only prints.
-import { existsSync, readFileSync, writeFileSync, copyFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, copyFileSync, mkdirSync, readdirSync } from "node:fs";
 import { execSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,11 +26,31 @@ export function launchSpec(): { command: string; args: string[] } {
 
 type JsonFileClient = { client: string; file: string; key: "mcpServers"; exists: () => boolean };
 
+/** Claude Desktop config locations: the direct download uses %APPDATA%\Claude; the Microsoft Store build is sandboxed
+ *  and keeps its files under %LOCALAPPDATA%\Packages\Claude_<id>\LocalCache\Roaming\Claude. Both may exist; each one that
+ *  has a config file (or a real app folder) is configured. */
+function claudeDesktopClients(): JsonFileClient[] {
+  const out: JsonFileClient[] = [];
+  const direct = path.join(appdata(), "Claude");
+  if (existsSync(path.join(direct, "claude_desktop_config.json")) || existsSync(path.join(direct, "config.json")))
+    out.push({ client: "Claude Desktop", file: path.join(direct, "claude_desktop_config.json"), key: "mcpServers", exists: () => true });
+  const packages = path.join(process.env.LOCALAPPDATA ?? path.join(home(), "AppData", "Local"), "Packages");
+  try {
+    for (const d of readdirSync(packages)) {
+      if (!/^Claude_/.test(d)) continue;
+      const dir = path.join(packages, d, "LocalCache", "Roaming", "Claude");
+      if (existsSync(dir)) out.push({ client: "Claude Desktop (Store)", file: path.join(dir, "claude_desktop_config.json"), key: "mcpServers", exists: () => true });
+    }
+  } catch { /* no Packages dir */ }
+  if (out.length === 0) out.push({ client: "Claude Desktop", file: path.join(direct, "claude_desktop_config.json"), key: "mcpServers", exists: () => existsSync(direct) });
+  return out;
+}
+
 function jsonClients(): JsonFileClient[] {
   const vscodeCline = path.join(appdata(), "Code", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json");
   const cursorCline = path.join(appdata(), "Cursor", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json");
   return [
-    { client: "Claude Desktop", file: path.join(appdata(), "Claude", "claude_desktop_config.json"), key: "mcpServers", exists: () => existsSync(path.join(appdata(), "Claude")) },
+    ...claudeDesktopClients(),
     { client: "Cursor", file: path.join(home(), ".cursor", "mcp.json"), key: "mcpServers", exists: () => existsSync(path.join(home(), ".cursor")) || existsSync(path.join(process.env.LOCALAPPDATA ?? "", "Programs", "cursor")) },
     { client: "Cline (VS Code)", file: vscodeCline, key: "mcpServers", exists: () => existsSync(path.dirname(path.dirname(vscodeCline))) },
     { client: "Cline (Cursor)", file: cursorCline, key: "mcpServers", exists: () => existsSync(path.dirname(path.dirname(cursorCline))) },
@@ -95,7 +115,7 @@ export function manualSnippet(): string {
 
 export function runSetup(opts: SetupOptions = {}): ClientResult[] {
   const wanted = opts.clients?.length ? new Set(opts.clients.map((c) => CLIENT_IDS[c] ?? c)) : undefined;
-  const pick = (name: string) => !wanted || wanted.has(name);
+  const pick = (name: string) => !wanted || wanted.has(name) || (name === "Claude Desktop (Store)" && wanted.has("Claude Desktop"));
   const results: ClientResult[] = [];
   if (pick("Claude Code")) results.push(updateClaudeCode(opts));
   for (const c of jsonClients()) if (pick(c.client)) results.push(updateJsonClient(c, opts));

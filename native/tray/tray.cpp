@@ -66,7 +66,8 @@ static HICON appIcon() {
     if (!g_icon) {
         std::wstring ico = g_exeDir + L"\\deskdock.ico";
         int cx = GetSystemMetrics(SM_CXSMICON), cy = GetSystemMetrics(SM_CYSMICON);
-        g_icon = (HICON)LoadImageW(nullptr, ico.c_str(), IMAGE_ICON, cx, cy, LR_LOADFROMFILE);
+        g_icon = (HICON)LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(1), IMAGE_ICON, cx, cy, 0); // embedded
+        if (!g_icon) g_icon = (HICON)LoadImageW(nullptr, ico.c_str(), IMAGE_ICON, cx, cy, LR_LOADFROMFILE);
         if (!g_icon) g_icon = LoadIconW(nullptr, IDI_APPLICATION);
     }
     return g_icon;

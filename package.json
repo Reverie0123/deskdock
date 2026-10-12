@@ -17,7 +17,8 @@
     "LICENSE",
     "CHANGELOG.md",
     "llms-install.md",
-    "PRIVACY.md"
+    "PRIVACY.md",
+    "install.ps1"
   ],
   "engines": {
     "node": ">=20"
@@ -27,12 +28,12 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "build:helper": "g++ -O2 -std=c++17 -static -s -Wall -Wno-misleading-indentation -o resources/deskdock-helper.exe native/helper/helper.cpp -lole32 -loleaut32 -luuid -lgdiplus -lgdi32 -luser32 -ldwmapi -loleacc -lshlwapi",
+    "build:helper": "windres native/helper/helper.rc -O coff -o native/helper/helper_res.o && g++ -O2 -std=c++17 -static -s -Wall -Wno-misleading-indentation -o resources/deskdock-helper.exe native/helper/helper.cpp native/helper/helper_res.o -lole32 -loleaut32 -luuid -lgdiplus -lgdi32 -luser32 -ldwmapi -loleacc -lshlwapi -limm32 -ladvapi32",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
     "test": "node --test --test-concurrency=1 tests/*.test.mjs",
     "test:e2e": "node tests/e2e/notepad.e2e.mjs",
-    "build:tray": "g++ -O2 -std=c++17 -static -s -Wall -mwindows -municode -o resources/deskdock-tray.exe native/tray/tray.cpp -lshell32 -luser32 -lole32",
+    "build:tray": "windres native/tray/tray.rc -O coff -o native/tray/tray_res.o && g++ -O2 -std=c++17 -static -s -Wall -mwindows -municode -o resources/deskdock-tray.exe native/tray/tray.cpp native/tray/tray_res.o -lshell32 -luser32 -lole32",
     "tray": "start resources/deskdock-tray.exe",
     "prepublishOnly": "npm run build && npm test",
     "pack:mcpb": "npx @anthropic-ai/mcpb pack . dist-mcpb/deskdock.mcpb"

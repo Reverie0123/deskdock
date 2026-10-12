@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { PolicyStore, policyDir, DEFAULT_POLICY, type Policy, type Level } from "./policy.js";
 import { MacroStore, MACRO_NAME } from "./macros.js";
 
-const LEVELS: Level[] = ["block", "read", "click", "full"];
+const LEVELS: Level[] = ["block", "read", "click", "ask", "full"];
 
 function panelHtmlPath(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));

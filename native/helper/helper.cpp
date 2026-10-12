@@ -12,6 +12,11 @@ using std::min; using std::max;
 #include <oleacc.h>
 #include <servprov.h>
 #include <shlwapi.h>
+#include <imm.h>
+#ifndef IMC_GETOPENSTATUS
+#define IMC_GETOPENSTATUS 0x0005
+#define IMC_SETOPENSTATUS 0x0006
+#endif
 #include <io.h>
 #include <fcntl.h>
 #include <cstdio>
@@ -95,6 +100,13 @@ static DWORD realPid(HWND h, DWORD pid) {
     }, (LPARAM)&st);
     return st.found;
 }
+// Windows will not deliver injected input to a window of an elevated process (UIPI); tell the model up front.
+static int isElevated(DWORD pid) { // 1 yes, 0 no, -1 unknown (cannot open the process: treat as elevated)
+    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid); if (!h) return -1;
+    HANDLE tok = nullptr; int r = -1;
+    if (OpenProcessToken(h, TOKEN_QUERY, &tok)) { TOKEN_ELEVATION te{}; DWORD n = 0; if (GetTokenInformation(tok, TokenElevation, &te, sizeof te, &n)) r = te.TokenIsElevated ? 1 : 0; CloseHandle(tok); }
+    CloseHandle(h); return r;
+}
 static json windowJson(HWND h) {
     wchar_t title[512] = L"", cls[256] = L"";
     GetWindowTextW(h, title, 512); GetClassNameW(h, cls, 256);
@@ -103,7 +115,7 @@ static json windowJson(HWND h) {
     return {
         {"hwnd", (long long)(intptr_t)h}, {"title", w2u(title)}, {"class", w2u(cls)},
         {"pid", (long long)pid}, {"process", processName(pid)}, {"rect", rectJson(frameRect(h))},
-        {"minimized", IsIconic(h) != 0}, {"focused", GetForegroundWindow() == h}
+        {"minimized", IsIconic(h) != 0}, {"focused", GetForegroundWindow() == h}, {"elevated", isElevated(pid) != 0}
     };
 }
 static json listWindows(const json&) {
@@ -131,6 +143,7 @@ static json windowAt(const json& a) {
 }
 static json foregroundWindow(const json&) {
     HWND h = GetForegroundWindow();
+    for (int i = 0; i < 6 && !h; i++) { Sleep(50); h = GetForegroundWindow(); } // NULL for a moment while focus moves between windows
     if (!h) throw std::runtime_error("no foreground window");
     return windowJson(h);
 }
@@ -274,9 +287,25 @@ static json scroll(const json& a) {
     sendInputs(s);
     return {{"x", x}, {"y", y}, {"dx", dx}, {"dy", dy}};
 }
+// A Chinese/Japanese IME that is open can swallow or transform injected characters; close it for the duration of the typing.
+// ImmGetContext does not work across processes; the IME window of the target thread does accept WM_IME_CONTROL.
+static HWND imeWindowOf(HWND target) { HWND focus = target; GUITHREADINFO gti{}; gti.cbSize = sizeof gti; if (GetGUIThreadInfo(GetWindowThreadProcessId(target, nullptr), &gti) && gti.hwndFocus) focus = gti.hwndFocus; return ImmGetDefaultIMEWnd(focus); }
+static bool imeOpen(HWND ime) { return ime && SendMessageTimeoutW(ime, WM_IME_CONTROL, IMC_GETOPENSTATUS, 0, SMTO_ABORTIFHUNG, 300, nullptr) ? (LRESULT)SendMessageW(ime, WM_IME_CONTROL, IMC_GETOPENSTATUS, 0) != 0 : false; }
+static void imeSetOpen(HWND ime, bool open) { if (ime) SendMessageTimeoutW(ime, WM_IME_CONTROL, IMC_SETOPENSTATUS, open ? 1 : 0, SMTO_ABORTIFHUNG, 300, nullptr); }
+struct ImeGuard {
+    HWND ime = nullptr; BOOL wasOpen = FALSE;
+    ImeGuard() { HWND fg = GetForegroundWindow(); if (!fg) return; ime = imeWindowOf(fg); if (imeOpen(ime)) { wasOpen = TRUE; imeSetOpen(ime, false); Sleep(30); } }
+    ~ImeGuard() { if (wasOpen) imeSetOpen(ime, true); }
+};
+static json imeStatus(const json& a) { // test support: query or set the IME open state of a window
+    HWND h = hwndArg(a); if (!h) h = GetForegroundWindow(); HWND ime = imeWindowOf(h);
+    if (a.contains("open")) imeSetOpen(ime, a["open"].get<bool>());
+    return {{"imeWindow", (long long)(intptr_t)ime}, {"open", imeOpen(ime)}};
+}
 static json typeText(const json& a) {
     std::wstring w = u2w(a.at("text").get<std::string>());
     if (w.size() > 20000) w.resize(20000);
+    ImeGuard ime;
     std::vector<INPUT> v;
     for (wchar_t c : w) {
         if (c == L'\n') { // Enter instead of a unicode LF, which most apps ignore
@@ -288,7 +317,7 @@ static json typeText(const json& a) {
     }
     // send in chunks so long texts don't overflow the input queue
     for (size_t i = 0; i < v.size(); i += 64) { std::vector<INPUT> chunk(v.begin() + i, v.begin() + min(v.size(), i + 64)); sendInputs(chunk); Sleep(5); }
-    return {{"chars", (long long)w.size()}};
+    return {{"chars", (long long)w.size()}, {"imeWasOpen", ime.wasOpen != 0}};
 }
 static WORD vkFromName(std::string k) {
     std::transform(k.begin(), k.end(), k.begin(), ::tolower);
@@ -497,6 +526,15 @@ static json uiaSnapshot(const json& a) {
             size_t before = nodes.size();
             for (HWND rc : renderChildren(h)) { if (budget <= 0) break; readRoot(rc, 1); }
             contentNodes = (int)(nodes.size() - before);
+            if (nodes.size() <= 6) { // chrome only: the accessibility tree is still being built after our knock; try once more
+                Sleep(700); knockChromium(h);
+                { std::lock_guard<std::mutex> lk(g_refMutex); if (g_gen.load() != gen) throw std::runtime_error("superseded by a newer snapshot"); g_refs.clear(); g_nextRef = 1; }
+                nodes = json::array(); budget = maxNodes;
+                readRoot(h, 0);
+                before = nodes.size();
+                for (HWND rc : renderChildren(h)) { if (budget <= 0) break; readRoot(rc, 1); }
+                contentNodes = (int)(nodes.size() - before);
+            }
         }
         walker->Release();
         json out = {{"window", windowJson(h)}, {"nodes", nodes}, {"truncated", budget <= 0}};
@@ -621,9 +659,23 @@ static json uiaAction(const json& a, const std::string& action) {
     }, timeoutMs);
 }
 
+// ---------- user confirmation (policy level "ask") ----------
+typedef int (WINAPI* MessageBoxTimeoutW_t)(HWND, LPCWSTR, LPCWSTR, UINT, WORD, DWORD);
+static json confirm(const json& a) {
+    std::wstring text = u2w(a.value("text", "")), title = u2w(a.value("title", "DeskDock"));
+    int timeoutMs = a.value("timeoutMs", 30000);
+    static MessageBoxTimeoutW_t mbt = (MessageBoxTimeoutW_t)GetProcAddress(GetModuleHandleW(L"user32.dll"), "MessageBoxTimeoutW");
+    int r;
+    if (mbt) r = mbt(nullptr, text.c_str(), title.c_str(), MB_YESNO | MB_ICONQUESTION | MB_TOPMOST | MB_SETFOREGROUND | MB_DEFBUTTON2, 0, (DWORD)timeoutMs);
+    else r = MessageBoxW(nullptr, text.c_str(), title.c_str(), MB_YESNO | MB_ICONQUESTION | MB_TOPMOST | MB_SETFOREGROUND | MB_DEFBUTTON2);
+    std::string answer = r == IDYES ? "yes" : r == IDNO ? "no" : "timeout";
+    return {{"answer", answer}};
+}
+
 // ---------- main loop ----------
 static json dispatch(const std::string& op, const json& a) {
     if (op == "ping") return {{"pong", true}, {"pid", (long long)GetCurrentProcessId()}};
+    if (op == "confirm") return confirm(a);
     if (op == "list_windows") return listWindows(a);
     if (op == "focus_window") return focusWindow(a);
     if (op == "window_at") return windowAt(a);
@@ -637,6 +689,7 @@ static json dispatch(const std::string& op, const json& a) {
     if (op == "drag") return drag(a);
     if (op == "scroll") return scroll(a);
     if (op == "type") return typeText(a);
+    if (op == "ime_status") return imeStatus(a);
     if (op == "key") return pressKeys(a);
     if (op == "clipboard_get") return clipboardGet(a);
     if (op == "clipboard_set") return clipboardSet(a);

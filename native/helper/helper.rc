@@ -1,0 +1,34 @@
+// Version information and icon for deskdock-helper.exe. Heuristic AV engines treat a bare exe without any
+// version resource as more suspicious; this also shows a sensible name in Task Manager and file properties.
+#include <windows.h>
+
+1 ICON "../../resources/deskdock.ico"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION     0,1,0,0
+PRODUCTVERSION  0,1,0,0
+FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
+FILEFLAGS       0
+FILEOS          VOS_NT_WINDOWS32
+FILETYPE        VFT_APP
+FILESUBTYPE     VFT2_UNKNOWN
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "CompanyName",      "DeskDock (open source, github.com/Reverie0123/deskdock)"
+      VALUE "FileDescription",  "DeskDock native helper: UI Automation, screenshots and input for the DeskDock MCP server"
+      VALUE "FileVersion",      "0.1.0.0"
+      VALUE "InternalName",     "deskdock-helper"
+      VALUE "LegalCopyright",   "MIT License"
+      VALUE "OriginalFilename", "deskdock-helper.exe"
+      VALUE "ProductName",      "DeskDock"
+      VALUE "ProductVersion",   "0.1.0"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END

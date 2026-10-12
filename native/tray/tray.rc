@@ -1,0 +1,32 @@
+#include <windows.h>
+
+1 ICON "../../resources/deskdock.ico"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION     0,1,0,0
+PRODUCTVERSION  0,1,0,0
+FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
+FILEFLAGS       0
+FILEOS          VOS_NT_WINDOWS32
+FILETYPE        VFT_APP
+FILESUBTYPE     VFT2_UNKNOWN
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "CompanyName",      "DeskDock (open source, github.com/Reverie0123/deskdock)"
+      VALUE "FileDescription",  "DeskDock tray: control panel, pause switch and logs"
+      VALUE "FileVersion",      "0.1.0.0"
+      VALUE "InternalName",     "deskdock-tray"
+      VALUE "LegalCopyright",   "MIT License"
+      VALUE "OriginalFilename", "deskdock-tray.exe"
+      VALUE "ProductName",      "DeskDock"
+      VALUE "ProductVersion",   "0.1.0"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END

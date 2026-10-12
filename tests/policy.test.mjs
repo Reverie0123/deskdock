@@ -30,6 +30,9 @@ test("decide: rank of action vs level", () => {
   assert.equal(decide("read", "click", "x.exe", "").allowed, false);
   assert.equal(decide("read", "read", "x.exe", "").allowed, true);
   assert.equal(decide("block", "read", "x.exe", "").allowed, false);
+  assert.deepEqual(decide("ask", "type", "x.exe", ""), { allowed: true, level: "ask", confirm: true });
+  assert.equal(decide("ask", "read", "x.exe", "").confirm, false);
+  assert.equal(decide("full", "type", "x.exe", "").confirm, false);
   const d = decide("read", "type", "msedge.exe", "Edge");
   assert.match(d.reason, /msedge\.exe/);
   assert.match(d.reason, /policy\.json/);

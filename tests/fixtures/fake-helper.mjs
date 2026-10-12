@@ -32,6 +32,7 @@ rl.on("line", (line) => {
     case "uia_click": return reply({ action: "invoke", rect: rect(0, 0, 1, 1) });
     case "focus_window": return reply({ focused: true, window: WINDOWS.find((w) => w.hwnd === a.hwnd) ?? WINDOWS[1] });
     case "clipboard_get": return reply({ text: "clip", hasText: true });
+    case "confirm": return reply({ answer: /DENY-ME/.test(a.text) ? "no" : /TIMEOUT-ME/.test(a.text) ? "timeout" : "yes" });
     default: return reply({ pong: false, pid: process.pid, echo: a });
   }
 });

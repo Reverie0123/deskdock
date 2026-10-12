@@ -16,7 +16,7 @@ One command finds the AI clients installed on this machine and adds DeskDock to 
 
 - **Installs in one line, needs nothing else.** A single executable plus Node. No Python, no .NET runtime, no model download.
 - **Reads windows as text, not pixels.** Controls come back as `[ref] button "Save"` lines with exact screen rects. Clicking by ref survives window moves, DPI changes and multiple monitors. A screenshot is the fallback, not the default.
-- **You decide what it may touch.** Every app gets a level: block, read, click or full. Browsers are read-only by default, terminals and IDEs are click-only, password managers and payment apps are blocked. Denied actions are explained to the model so it asks you instead of guessing.
+- **You decide what it may touch.** Every app gets a level: block, read, click, ask (a yes/no dialog before each action) or full. Browsers are read-only by default, terminals and IDEs are click-only, password managers and payment apps are blocked. Denied actions are explained to the model so it asks you instead of guessing.
 - **Chinese and English throughout.** Tool descriptions, errors and the setup command follow your system language, and the built-in Windows OCR reads Chinese UI text out of the box.
 
 ## How it compares
@@ -81,6 +81,7 @@ The policy lives at `%APPDATA%\deskdock\policy.json` (run `deskdock policy` to p
 | `block` | no | no | no |
 | `read` | yes | no | no |
 | `click` | yes | yes | no |
+| `ask` | yes | after you click Yes in a dialog | after you click Yes in a dialog |
 | `full` | yes | yes | yes |
 
 Keys are lower-case process names, `title:` followed by a substring of the window title, or `title=` followed by the exact title (used for the Win+R Run box). When several rules match (a process rule and a `title:` rule), the strictest one wins; otherwise `default` applies. Windows whose process cannot be identified are capped at `read`. When a tool is denied, the model receives the reason and the file path, and is told to ask you to do that step yourself.
@@ -116,6 +117,12 @@ Most native, WinUI, Office and Chromium apps expose a full tree. Electron apps b
 ## Install
 
 **From npm (after release):** `npx deskdock setup`.
+
+**No Node.js on this machine?** One line in PowerShell downloads a portable Node into DeskDock's own folder (no admin rights, nothing system-wide) and runs setup:
+
+```powershell
+irm https://raw.githubusercontent.com/Reverie0123/deskdock/main/install.ps1 | iex
+```
 
 **From source** (Node.js 20 or newer):
 

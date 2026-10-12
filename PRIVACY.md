@@ -20,6 +20,8 @@ DeskDock is a collector. What it reads is handed to **your AI client** (Claude C
 | Text you ask the model to type | `type`, `set_value`, `clipboard_set` | it came from the model | audit log keeps only the character count; a **macro** file keeps the recorded text unless you made it a parameter |
 | Tool calls themselves | every call | no | audit log: `%APPDATA%\deskdock\logs\*.jsonl` (time, tool, arguments, target window, outcome) |
 
+The `ask` level pops a system dialog before every mouse or keyboard action; 30 seconds without an answer counts as no.
+
 A `read` level in the policy still means the model can see that app. Use `block` for anything the model should not even look at; while a blocked app is visible, full-screen capture is refused.
 
 ## What never happens

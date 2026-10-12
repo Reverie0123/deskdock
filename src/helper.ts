@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 export interface WindowInfo {
   hwnd: number; title: string; class: string; pid: number; process: string;
-  rect: { x: number; y: number; w: number; h: number }; minimized: boolean; focused: boolean;
+  rect: { x: number; y: number; w: number; h: number }; minimized: boolean; focused: boolean; elevated?: boolean;
 }
 export interface UiaNode {
   ref: number; depth: number; type: string; name: string; rect: { x: number; y: number; w: number; h: number };

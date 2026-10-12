@@ -20,8 +20,21 @@ const CLASS_LABELS: Record<string, string> = {
   Shell_TrayWnd: "Taskbar", Shell_SecondaryTrayWnd: "Taskbar (secondary monitor)", NotifyIconOverflowWindow: "Tray overflow",
   TopLevelWindowForOverflowXamlIsland: "Tray overflow", "#32768": "Context menu", Xaml_WindowedPopupClass: "Popup",
 };
+function describeAction(tool: string, args: Record<string, unknown>): string {
+  switch (tool) {
+    case "click": return args.ref !== undefined ? `click control [${args.ref}]` : `${args.button ?? "left"} click at (${args.x}, ${args.y})${(args.count as number) > 1 ? ` x${args.count}` : ""}`;
+    case "type": return `type ${String(args.text ?? "").length} characters: "${String(args.text ?? "").slice(0, 80)}"`;
+    case "key": return `press ${args.keys}${(args.repeat as number) > 1 ? ` x${args.repeat}` : ""}`;
+    case "set_value": return `set control [${args.ref}] to "${String(args.text ?? "").slice(0, 80)}"`;
+    case "drag": return `drag (${args.x1}, ${args.y1}) -> (${args.x2}, ${args.y2})`;
+    case "scroll": return `scroll at (${args.x}, ${args.y})`;
+    case "close_window": return "close the window";
+    case "focus_window": return "bring the window to the front";
+    default: return `${tool} ${JSON.stringify(args).slice(0, 100)}`;
+  }
+}
 export function formatWindow(w: WindowInfo): string {
-  const flags = [w.focused ? "focused" : "", w.minimized ? "minimized" : ""].filter(Boolean).join(", ");
+  const flags = [w.focused ? "focused" : "", w.minimized ? "minimized" : "", w.elevated ? "elevated: Windows blocks input to it" : ""].filter(Boolean).join(", ");
   const title = w.title || CLASS_LABELS[w.class] || w.class;
   return `hwnd=${w.hwnd} "${title}" [${w.process}] at (${w.rect.x},${w.rect.y}) ${w.rect.w}x${w.rect.h}${flags ? ` (${flags})` : ""}`;
 }
@@ -107,6 +120,20 @@ export function registerTools(server: McpServer, deps: Deps): void {
           if (!d.allowed) {
             audit.write({ ts: new Date().toISOString(), tool, args: redactArgs(tool, args), target: { process: win.process, title: win.title, hwnd: win.hwnd }, outcome: "denied", detail: d.reason, ms: Date.now() - t0 });
             return fail(d.reason!);
+          }
+          if (d.confirm) {
+            const zh = (process.env.DESKDOCK_LANG ?? Intl.DateTimeFormat().resolvedOptions().locale ?? "").toLowerCase().startsWith("zh");
+            const what = describeAction(tool, args);
+            const msg = zh ? `AI 想在「${win.title.slice(0, 50)}」(${win.process}) 里执行：\n\n${what}\n\n允许吗？（30 秒不回答视为拒绝）`
+                           : `The AI wants to act in "${win.title.slice(0, 50)}" (${win.process}):\n\n${what}\n\nAllow? (no answer within 30 s = no)`;
+            const r = await helper.call<{ answer: string }>("confirm", { title: "DeskDock", text: msg, timeoutMs: 30000 }, 40000);
+            if (r.answer !== "yes") {
+              const reason = r.answer === "timeout" ? `The user did not answer the confirmation for ${tool} in "${win.title.slice(0, 40)}" within 30 s; treat it as declined and do not retry.` : `The user declined ${tool} in "${win.title.slice(0, 40)}". Do not retry; ask them what to do instead.`;
+              audit.write({ ts: new Date().toISOString(), tool, args: redactArgs(tool, args), target: { process: win.process, title: win.title, hwnd: win.hwnd }, outcome: "denied", detail: reason, ms: Date.now() - t0 });
+              return fail(reason);
+            }
+            // the dialog took the foreground; give it back to the target before acting
+            try { await helper.call("focus_window", { hwnd: win.hwnd }); } catch { /* ignore */ }
           }
         }
         let macroTarget: MacroTarget | undefined;
@@ -250,8 +277,8 @@ export function registerTools(server: McpServer, deps: Deps): void {
     inputSchema: { text: z.string().min(1).max(20000) },
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
   }, guarded("type", "type", () => foreground(), async (a, win) => {
-    const r = await helper.call<{ chars: number }>("type", { text: a.text });
-    return text(`Typed ${r.chars} chars into ${win ? formatWindow(win) : "the foreground window"}.`);
+    const r = await helper.call<{ chars: number; imeWasOpen?: boolean }>("type", { text: a.text });
+    return text(`Typed ${r.chars} chars into ${win ? formatWindow(win) : "the foreground window"}.${r.imeWasOpen ? " (An IME was open and was held off while typing.)" : ""}`);
   }));
 
   server.registerTool("key", {

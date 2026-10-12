@@ -84,6 +84,22 @@ test("macro with a ref step but no target is rejected; replay resolves targets t
   assert.equal(gone.err, true); assert.match(gone.text, /deleted/);
 });
 
+test("ask level: actions go through a confirmation; no/timeout are denied and audited", async () => {
+  writeFileSync(policyFile, JSON.stringify({ version: 1, default: "full", rules: { "bank.exe": "block", "notepad.exe": "ask" } }));
+  await new Promise((r) => setTimeout(r, 30));
+  const ok = await call("type", { text: "fine" });
+  assert.equal(ok.err, false, ok.text);
+  const no = await call("type", { text: "DENY-ME please" });
+  assert.equal(no.err, true); assert.match(no.text, /declined/);
+  const late = await call("type", { text: "TIMEOUT-ME" });
+  assert.equal(late.err, true); assert.match(late.text, /did not answer/);
+  const read = await call("read_window", { hwnd: 2 });
+  assert.equal(read.err, false, "reads never ask");
+  assert.match(auditText(), /"tool":"type".*"outcome":"denied".*declined/);
+  writeFileSync(policyFile, JSON.stringify({ version: 1, default: "full", rules: { "bank.exe": "block", "msedge.exe": "read" } }));
+  await new Promise((r) => setTimeout(r, 30));
+});
+
 test("typed text is never written to the audit log in full", async () => {
   await call("type", { text: "SECRET-PASSWORD-123" });
   assert.doesNotMatch(auditText(), /SECRET-PASSWORD-123/);

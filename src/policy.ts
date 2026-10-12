@@ -2,8 +2,9 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-/** block: never touch; read: screenshot + read tree only; click: read + mouse, no keyboard; full: everything */
-export type Level = "block" | "read" | "click" | "full";
+/** block: never touch; read: screenshot + read tree only; click: read + mouse, no keyboard;
+ *  ask: everything, but each mouse/keyboard action pops a yes/no box for the user; full: everything */
+export type Level = "block" | "read" | "click" | "ask" | "full";
 export type Action = "read" | "click" | "type";
 
 export interface Policy {
@@ -100,15 +101,15 @@ export class PolicyStore {
   }
 }
 
-const LEVELS: Level[] = ["block", "read", "click", "full"];
-const RANK: Record<Level, number> = { block: 0, read: 1, click: 2, full: 3 };
+const LEVELS: Level[] = ["block", "read", "click", "ask", "full"];
+const RANK: Record<Level, number> = { block: 0, read: 1, click: 2, ask: 3, full: 4 };
 export function strictest(a: Level, b: Level): Level { return RANK[a] <= RANK[b] ? a : b; }
 const NEEDED: Record<Action, number> = { read: 1, click: 2, type: 3 };
 
-export interface Decision { allowed: boolean; level: Level; reason?: string }
+export interface Decision { allowed: boolean; level: Level; reason?: string; /** level "ask": the user must confirm this action first */ confirm?: boolean }
 
 export function decide(level: Level, action: Action, processName: string, title: string): Decision {
-  if (RANK[level] >= NEEDED[action]) return { allowed: true, level };
+  if (RANK[level] >= NEEDED[action]) return { allowed: true, level, confirm: level === "ask" && action !== "read" };
   const target = processName || title || "this window";
   const what = action === "read" ? "read or screenshot" : action === "click" ? "click in" : "type into";
   const because = level === "block"

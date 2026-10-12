@@ -37,7 +37,7 @@ Screen content can contain text written by someone else (a web page, an e-mail, 
 
 ## Verifying the binaries
 
-`resources/deskdock-helper.exe` and `resources/deskdock-tray.exe` are built from `native/` with MinGW-w64 using the exact commands in `package.json` (`build:helper`, `build:tray`). The GitHub Actions workflow in `.github/workflows/build.yml` rebuilds them on a clean GitHub-hosted Windows runner and publishes the SHA-256 of every file; compare them with what you downloaded, or build your own.
+`resources/deskdock-native.exe` (one file: the engine in `--helper` mode, the tray icon when double-clicked) is built from `native/` with MinGW-w64 using the exact command in `package.json` (`build:native`). The GitHub Actions workflow in `.github/workflows/build.yml` rebuilds them on a clean GitHub-hosted Windows runner and publishes the SHA-256 of every file; compare them with what you downloaded, or build your own.
 
 ## Deleting everything
 
@@ -78,7 +78,7 @@ DeskDock 是个采集器。它读到的东西交给**你的 AI 客户端**（Cla
 
 ## 验证可执行文件
 
-`resources/deskdock-helper.exe` 和 `resources/deskdock-tray.exe` 由 `native/` 下的源码用 MinGW-w64 编译，命令就是 `package.json` 里的 `build:helper` 和 `build:tray`。`.github/workflows/build.yml` 会在 GitHub 托管的干净 Windows 机器上重新编译并公布每个文件的 SHA-256，你可以和下载到的对比，或者自己编。
+`resources/deskdock-native.exe`（一个文件：带 `--helper` 参数时是引擎，双击就是托盘图标）由 `native/` 下的源码用 MinGW-w64 编译，命令就是 `package.json` 里的 `build:native`。`.github/workflows/build.yml` 会在 GitHub 托管的干净 Windows 机器上重新编译并公布每个文件的 SHA-256，你可以和下载到的对比，或者自己编。
 
 ## 彻底删除
 

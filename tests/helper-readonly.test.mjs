@@ -6,10 +6,10 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
-const exe = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../resources/deskdock-helper.exe");
+const exe = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../resources/deskdock-native.exe");
 
 function startHelper() {
-  const p = spawn(exe, [], { stdio: ["pipe", "pipe", "inherit"] });
+  const p = spawn(exe, ["--helper"], { stdio: ["pipe", "pipe", "inherit"] });
   const rl = createInterface({ input: p.stdout });
   const pending = new Map();
   let nextId = 1;

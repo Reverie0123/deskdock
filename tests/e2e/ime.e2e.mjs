@@ -7,7 +7,7 @@ import { createInterface } from "node:readline";
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const p = spawn(path.join(process.cwd(), "resources", "deskdock-helper.exe"), [], { stdio: ["pipe", "pipe", "inherit"] });
+const p = spawn(path.join(process.cwd(), "resources", "deskdock-native.exe"), ["--helper"], { stdio: ["pipe", "pipe", "inherit"] });
 const rl = createInterface({ input: p.stdout }); const q = new Map(); let id = 1;
 rl.on("line", (l) => { const m = JSON.parse(l); const cb = q.get(m.id); q.delete(m.id); cb(m); });
 const call = (op, args = {}) => new Promise((res, rej) => { const i = id++; q.set(i, (m) => (m.ok ? res(m.result) : rej(new Error(m.error)))); p.stdin.write(JSON.stringify({ id: i, op, args }) + "\n"); });

@@ -14,7 +14,7 @@ const home = path.join(process.env.LOCALAPPDATA, "Temp", "deskdock", "ask-home")
 writeFileSync(path.join(home, "policy.json"), JSON.stringify({ version: 1, default: "full", rules: { "notepad.exe": "ask" } }));
 
 // a second, independent helper instance acts as "the user" clicking the dialog
-const p = spawn(path.join(root, "resources", "deskdock-helper.exe"), [], { stdio: ["pipe", "pipe", "inherit"] });
+const p = spawn(path.join(root, "resources", "deskdock-native.exe"), ["--helper"], { stdio: ["pipe", "pipe", "inherit"] });
 const rl = createInterface({ input: p.stdout }); const q = new Map(); let id = 1;
 rl.on("line", (l) => { const m = JSON.parse(l); const cb = q.get(m.id); q.delete(m.id); cb(m); });
 const user = (op, args = {}) => new Promise((res, rej) => { const i = id++; q.set(i, (m) => (m.ok ? res(m.result) : rej(new Error(m.error)))); p.stdin.write(JSON.stringify({ id: i, op, args }) + "\n"); });

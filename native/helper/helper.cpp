@@ -702,7 +702,7 @@ static json dispatch(const std::string& op, const json& a) {
     if (op == "uia_set_value") return uiaAction(a, "setValue");
     throw std::runtime_error("unknown op: " + op);
 }
-int main() {
+static int helperMain() {
     _setmode(_fileno(stdout), _O_BINARY); _setmode(_fileno(stdin), _O_BINARY);
     { typedef BOOL(WINAPI* F)(HANDLE); auto f = (F)GetProcAddress(GetModuleHandleW(L"user32.dll"), "SetProcessDpiAwarenessContext"); if (f) f((HANDLE)-4 /*PER_MONITOR_AWARE_V2*/); }
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);

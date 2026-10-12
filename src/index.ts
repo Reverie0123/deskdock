@@ -52,6 +52,7 @@ function usage(lang: "zh" | "en"): string {
   deskdock setup        把 DeskDock 写进本机已安装的 AI 客户端配置（Claude Code / Claude 桌面应用 / Cursor / Cline / Windsurf）
   deskdock setup --remove   从上述配置中移除
   deskdock setup --dry-run  只显示将要做的改动，不写文件
+  deskdock setup --clients claude-code,cursor   只写这几个客户端
   deskdock policy       显示权限表文件位置
   deskdock panel        打开本地控制面板（权限、日志回放、宏）
   deskdock --help`
@@ -62,6 +63,7 @@ Usage:
   deskdock setup        add DeskDock to every installed AI client (Claude Code / Claude Desktop / Cursor / Cline / Windsurf)
   deskdock setup --remove   remove it again
   deskdock setup --dry-run  show what would change without writing
+  deskdock setup --clients claude-code,cursor   only these clients
   deskdock policy       print the policy file location
   deskdock panel        open the local control panel (permissions, log replay, macros)
   deskdock --help`;
@@ -88,7 +90,9 @@ async function main(): Promise<void> {
     return;
   }
   if (cmd === "setup") {
-    const results = runSetup({ remove: argv.includes("--remove"), dryRun: argv.includes("--dry-run"), lang });
+    const ci = argv.indexOf("--clients");
+    const clients = ci >= 0 ? String(argv[ci + 1] ?? "").split(",").map((x) => x.trim()).filter(Boolean) : undefined;
+    const results = runSetup({ remove: argv.includes("--remove"), dryRun: argv.includes("--dry-run"), lang, clients });
     process.stdout.write(formatResults(results, lang) + "\n");
     return;
   }

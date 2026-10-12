@@ -18,11 +18,11 @@ BEGIN
     BLOCK "040904B0"
     BEGIN
       VALUE "CompanyName",      "DeskDock (open source, github.com/Reverie0123/deskdock)"
-      VALUE "FileDescription",  "DeskDock native helper: UI Automation, screenshots and input for the DeskDock MCP server"
+      VALUE "FileDescription",  "DeskDock: tray icon, and the native engine for the DeskDock MCP server (--helper)"
       VALUE "FileVersion",      "0.1.0.0"
-      VALUE "InternalName",     "deskdock-helper"
+      VALUE "InternalName",     "deskdock-native"
       VALUE "LegalCopyright",   "MIT License"
-      VALUE "OriginalFilename", "deskdock-helper.exe"
+      VALUE "OriginalFilename", "deskdock-native.exe"
       VALUE "ProductName",      "DeskDock"
       VALUE "ProductVersion",   "0.1.0"
     END

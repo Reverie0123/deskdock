@@ -47,7 +47,7 @@ async function toggleViaMenu(wantPaused) {
   log("tray icon:", btn.trim().slice(0, 80));
   await call("click", { ref: refOf(btn), button: "right" }); await sleep(700);
   // the context menu is a class #32768 window owned by the tray process; it does not take the foreground
-  const menu = (await windows()).find((l) => /\[deskdock-tray\.exe\]/i.test(l) && /Context menu/.test(l));
+  const menu = (await windows()).find((l) => /\[deskdock-native\.exe\]/i.test(l) && /Context menu/.test(l));
   if (!menu) throw new Error("context menu window not found after right-click:\n" + (await windows()).join("\n"));
   log("menu window:", menu.slice(0, 80));
   const mtree = await call("read_window", { hwnd: hwndOf(menu), maxNodes: 50 });

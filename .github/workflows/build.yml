@@ -36,8 +36,7 @@ jobs:
       - name: Build native helpers from source
         shell: pwsh
         run: |
-          npm run build:helper
-          npm run build:tray
+          npm run build:native
 
       - name: Install, build and test
         shell: pwsh
@@ -49,13 +48,12 @@ jobs:
       - name: Hashes of shipped files
         shell: pwsh
         run: |
-          Get-FileHash resources/deskdock-helper.exe, resources/deskdock-tray.exe -Algorithm SHA256 | Format-Table Hash, Path -AutoSize | Tee-Object -FilePath hashes.txt
+          Get-FileHash resources/deskdock-native.exe -Algorithm SHA256 | Format-Table Hash, Path -AutoSize | Tee-Object -FilePath hashes.txt
           Get-Content hashes.txt
 
       - uses: actions/upload-artifact@v4
         with:
           name: deskdock-native-${{ github.sha }}
           path: |
-            resources/deskdock-helper.exe
-            resources/deskdock-tray.exe
+            resources/deskdock-native.exe
             hashes.txt

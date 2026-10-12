@@ -8,11 +8,15 @@ DeskDock is an MCP server for Windows. Once it is installed, any MCP client (Cla
 
 <!-- demo.gif: left, a chat window with one instruction; right, the desktop doing it. Added before release. -->
 
+**Download `DeskDock-Setup-0.1.0.exe`** from the [releases page](https://github.com/Reverie0123/deskdock/releases) and double-click it: pick a language, tick the AI apps to connect (the ones found on your PC are pre-ticked), done. Nothing else to install; no admin rights needed.
+
+Developers can skip the wizard:
+
 ```bash
 npx deskdock setup
 ```
 
-One command finds the AI clients installed on this machine and adds DeskDock to each of them. Restart the client and ask it to do something on your desktop.
+Either way, DeskDock is written into the MCP settings of every selected client. Restart the client and ask it to do something on your desktop.
 
 - **Installs in one line, needs nothing else.** A single executable plus Node. No Python, no .NET runtime, no model download.
 - **Reads windows as text, not pixels.** Controls come back as `[ref] button "Save"` lines with exact screen rects. Clicking by ref survives window moves, DPI changes and multiple monitors. A screenshot is the fallback, not the default.
@@ -92,7 +96,7 @@ Note that `read` still lets the model see what is on screen in that app, includi
 
 `deskdock panel` opens a local page (127.0.0.1 only) where you edit the permission table, browse the audit log by day, filter by tool or outcome, and replay a session step by step on a timeline. The MCP server also starts the panel in the background whenever a client launches it.
 
-`resources/deskdock-tray.exe` puts an icon in the notification area: open the panel, open the log folder, exit, and **Pause DeskDock**. While paused, every tool call is refused with a message telling the model to ask you to resume. Pause state is a marker file in `%APPDATA%\deskdock`, so it works even when the panel is not open.
+Double-clicking `resources/deskdock-native.exe` (the same file the server uses as its engine) puts an icon in the notification area: open the panel, open the log folder, exit, and **Pause DeskDock**. While paused, every tool call is refused with a message telling the model to ask you to resume. Pause state is a marker file in `%APPDATA%\deskdock`, so it works even when the panel is not open.
 
 ## Macros
 
@@ -116,7 +120,9 @@ Most native, WinUI, Office and Chromium apps expose a full tree. Electron apps b
 
 ## Install
 
-**From npm (after release):** `npx deskdock setup`.
+**Installer (recommended for most people):** `DeskDock-Setup-<version>.exe` from the releases page. Per-user install into `%LOCALAPPDATA%\Programs\DeskDock`, bundles its own Node, adds Start-menu entries for the tray and the control panel, and uninstalls cleanly (it also removes itself from the AI clients it was added to).
+
+**From npm (developers):** `npx deskdock setup`.
 
 **No Node.js on this machine?** One line in PowerShell downloads a portable Node into DeskDock's own folder (no admin rights, nothing system-wide) and runs setup:
 
@@ -136,7 +142,7 @@ node dist/index.js setup
 
 `setup` edits the config of each installed client (Claude Code via `claude mcp add`, Claude Desktop, Cursor, Cline, Windsurf) after backing it up as `.deskdock.bak`; `setup --dry-run` only prints what would change; `setup --remove` undoes it. For clients without a standard config file, `setup` prints a JSON snippet to paste.
 
-The native helper (`resources/deskdock-helper.exe`) is prebuilt. Rebuild it with `npm run build:helper` only if you change `native/helper/helper.cpp` (needs MinGW-w64 g++).
+The native program (`resources/deskdock-native.exe`) is prebuilt. Rebuild it with `npm run build:native` only if you change `native/` (needs MinGW-w64 g++ and windres).
 
 ## FAQ
 
@@ -154,7 +160,7 @@ The native helper (`resources/deskdock-helper.exe`) is prebuilt. Rebuild it with
 
 ```bash
 npm run build          # TypeScript -> dist/
-npm run build:helper   # native helper (MinGW g++)
+npm run build:native   # native engine + tray, one exe (MinGW g++)
 npm test               # read-only tests; they never inject input
 ```
 

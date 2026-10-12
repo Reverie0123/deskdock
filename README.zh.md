@@ -8,11 +8,15 @@ DeskDock 是一个 Windows 上的 MCP 服务。装好之后，任何 MCP 客户�
 
 <!-- demo.gif：左边聊天窗口一句话，右边桌面自己动。发布前补。 -->
 
+**在 [Releases](https://github.com/Reverie0123/deskdock/releases) 下载 `DeskDock-Setup-0.1.0.exe`**，双击：选语言，勾选要接入的 AI 软件（电脑上已装的会自动勾上），完成。不用装别的，不需要管理员权限。
+
+开发者可以跳过向导：
+
 ```bash
 npx deskdock setup
 ```
 
-一条命令找到这台电脑上装了哪些 AI 客户端，把 DeskDock 写进它们各自的配置。重启客户端，让它替你在桌面上做点事。
+两种方式最后都是把 DeskDock 写进你选中的客户端的 MCP 配置。重启客户端，让它替你在桌面上做点事。
 
 - **一行装好，别的什么都不用装。** 一个可执行文件加 Node。不装 Python，不装 .NET，不下载模型。
 - **把窗口读成文字，不是看图。** 控件以 `[ref] button "保存"` 这样一行一个的形式返回，带精确的屏幕坐标。按 ref 点击不受窗口移动、缩放比例、多显示器影响。截图是后备，不是默认。
@@ -92,7 +96,7 @@ DeskDock 从不联网。它读到的一切（窗口文字、截图、OCR、剪�
 
 `deskdock panel` 打开一个只在本机的网页（只监听 127.0.0.1）：改权限表、按天看审计日志、按工具或结果筛选、在时间线上逐步回放一次会话。AI 客户端启动 MCP 服务时，面板也会在后台一起启动。
 
-`resources/deskdock-tray.exe` 在通知区域放一个图标：打开面板、打开日志目录、退出，以及**暂停 DeskDock**。暂停期间所有工具调用都会被拒绝，并告诉模型去请你恢复。暂停状态是 `%APPDATA%\deskdock` 下的一个标记文件，面板没开也照样生效。
+双击 `resources/deskdock-native.exe`（和服务用的引擎是同一个文件）会在通知区域放一个图标：打开面板、打开日志目录、退出，以及**暂停 DeskDock**。暂停期间所有工具调用都会被拒绝，并告诉模型去请你恢复。暂停状态是 `%APPDATA%\deskdock` 下的一个标记文件，面板没开也照样生效。
 
 ## 宏
 
@@ -116,7 +120,9 @@ save_macro(name="wechat_send", description="发一条微信", fromLast=4,
 
 ## 安装
 
-**从 npm（发布后）**：`npx deskdock setup`。
+**安装包（大多数人用这个）**：Releases 页的 `DeskDock-Setup-<版本>.exe`。装到 `%LOCALAPPDATA%\Programs\DeskDock`，自带 Node，开始菜单里有托盘和控制面板的入口，卸载干净（也会从接入过的 AI 客户端里把自己撤掉）。
+
+**从 npm（开发者）**：`npx deskdock setup`。
 
 **电脑上没有 Node.js？** 在 PowerShell 里一行命令，自动把便携版 Node 下到 DeskDock 自己的目录（不需要管理员，不改系统），然后跑 setup：
 
@@ -136,7 +142,7 @@ node dist/index.js setup
 
 `setup` 会先把每个客户端的配置备份成 `.deskdock.bak` 再修改（Claude Code 走 `claude mcp add`，另外还有 Claude 桌面应用、Cursor、Cline、Windsurf）；`setup --dry-run` 只打印将要做的改动；`setup --remove` 撤销。没有标准配置文件的客户端，`setup` 会打印一段可以粘贴的 JSON。
 
-原生辅助进程 `resources/deskdock-helper.exe` 已经编译好。只有改了 `native/helper/helper.cpp` 才需要 `npm run build:helper` 重新编译（需要 MinGW-w64 的 g++）。
+原生程序 `resources/deskdock-native.exe` 已经编译好。只有改了 `native/` 才需要 `npm run build:native` 重新编译（需要 MinGW-w64 的 g++ 和 windres）。
 
 ## 常见问题
 
@@ -154,7 +160,7 @@ node dist/index.js setup
 
 ```bash
 npm run build          # TypeScript -> dist/
-npm run build:helper   # 原生辅助进程（MinGW g++）
+npm run build:native   # 原生引擎 + 托盘，一个 exe（MinGW g++）
 npm test               # 只读测试，不会注入键鼠
 ```
 

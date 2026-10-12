@@ -29,11 +29,11 @@ export function wellFormed<T>(v: T): T {
 export function helperPath(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const candidates = [
-    path.resolve(here, "../resources/deskdock-helper.exe"),
-    path.resolve(here, "../../resources/deskdock-helper.exe"),
+    path.resolve(here, "../resources/deskdock-native.exe"),
+    path.resolve(here, "../../resources/deskdock-native.exe"),
   ];
   const found = candidates.find((p) => existsSync(p));
-  if (!found) throw new Error(`deskdock-helper.exe not found; run "npm run build:helper". Looked in: ${candidates.join(", ")}`);
+  if (!found) throw new Error(`deskdock-native.exe not found; run "npm run build:native". Looked in: ${candidates.join(", ")}`);
   return found;
 }
 
@@ -46,7 +46,7 @@ export class Helper {
   private queue: Promise<unknown> = Promise.resolve();
 
   /** `args` exists so tests can substitute `node fake-helper.mjs` for the real executable. */
-  constructor(private exe: string = helperPath(), private args: string[] = []) {}
+  constructor(private exe: string = helperPath(), private args: string[] = ["--helper"]) {}
 
   private ensure(): ChildProcessWithoutNullStreams {
     if (this.proc && this.proc.exitCode === null) return this.proc;

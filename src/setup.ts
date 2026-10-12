@@ -4,7 +4,8 @@ import { execSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export interface SetupOptions { remove?: boolean; dryRun?: boolean; lang?: "zh" | "en" }
+export interface SetupOptions { remove?: boolean; dryRun?: boolean; lang?: "zh" | "en"; /** limit to these client ids (claude-code, claude-desktop, cursor, cline, cline-cursor, windsurf) */ clients?: string[] }
+export const CLIENT_IDS: Record<string, string> = { "claude-code": "Claude Code", "claude-desktop": "Claude Desktop", cursor: "Cursor", cline: "Cline (VS Code)", "cline-cursor": "Cline (Cursor)", windsurf: "Windsurf" };
 export interface ClientResult { client: string; status: "written" | "removed" | "skipped" | "manual" | "error"; detail: string }
 
 const SERVER_NAME = "deskdock";
@@ -93,8 +94,11 @@ export function manualSnippet(): string {
 }
 
 export function runSetup(opts: SetupOptions = {}): ClientResult[] {
-  const results: ClientResult[] = [updateClaudeCode(opts)];
-  for (const c of jsonClients()) results.push(updateJsonClient(c, opts));
+  const wanted = opts.clients?.length ? new Set(opts.clients.map((c) => CLIENT_IDS[c] ?? c)) : undefined;
+  const pick = (name: string) => !wanted || wanted.has(name);
+  const results: ClientResult[] = [];
+  if (pick("Claude Code")) results.push(updateClaudeCode(opts));
+  for (const c of jsonClients()) if (pick(c.client)) results.push(updateJsonClient(c, opts));
   results.push({ client: "Cherry Studio / others", status: "manual", detail: "add an MCP server of type stdio with the command below" });
   return results;
 }

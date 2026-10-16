@@ -64,12 +64,12 @@ export function probePanel(port: number, timeoutMs = 1500): Promise<{ deskdock: 
   });
 }
 
-/** The panel another DeskDock instance is serving, from panel.json, if that instance is still alive. */
-export function runningPanel(): { port: number; url: string; pid: number } | null {
+/** The panel another DeskDock instance is serving, from panel.json, verified by asking that port (a pid can be recycled). */
+export async function runningPanel(): Promise<{ port: number; url: string; pid: number } | null> {
   try {
     const info = JSON.parse(readFileSync(path.join(policyDir(), "panel.json"), "utf8")) as { port: number; url: string; pid: number };
     try { process.kill(info.pid, 0); } catch { return null; }
-    return info;
+    return (await probePanel(info.port))?.deskdock ? info : null;
   } catch { return null; }
 }
 

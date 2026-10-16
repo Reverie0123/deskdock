@@ -33,7 +33,7 @@ rl.on("line", (line) => {
     case "uia_find": return (a.type === "document" && a.name === "Text editor") ? reply({ window: WINDOWS[1], node: { ref: 77, depth: 0, type: "document", name: "Text editor", rect: rect(100, 150, 600, 300) } }) : err("no control matched");
     case "uia_click": return reply({ action: "invoke", rect: rect(0, 0, 1, 1) });
     case "focus_window": return reply({ focused: true, window: WINDOWS.find((w) => w.hwnd === a.hwnd) ?? WINDOWS[1] });
-    case "clipboard_get": return reply({ text: "clip", hasText: true, ...(globalThis.__clipOwner ?? { ownerProcess: "notepad.exe", ownerTitle: "notes.txt - Notepad", ownerHwnd: 2 }) });
+    case "clipboard_get": { const o = globalThis.__clipOwner ?? { ownerProcess: "notepad.exe", ownerTitle: "notes.txt - Notepad", ownerHwnd: 2 }; return reply({ text: o.empty ? "" : "clip", hasText: !o.empty, ownSet: false, empty: false, ...o }); }
     case "clipboard_set": return (a.expectHwnd && a.expectHwnd !== 2) ? err("refused: the foreground window changed before the input was sent") : reply({ chars: String(a.text ?? "").length });
     case "type": return (a.expectHwnd && a.expectHwnd !== 2) ? err("refused: the foreground window changed before the input was sent") : reply({ chars: String(a.text ?? "").length });
     case "key": return (a.expectHwnd && a.expectHwnd !== 2) ? err("refused: the foreground window changed before the input was sent") : reply({ keys: a.keys, repeat: a.repeat ?? 1 });

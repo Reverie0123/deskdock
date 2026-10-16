@@ -443,10 +443,12 @@ static json clipboardOwnerJson() {
 static json clipboardOwner(const json&) { return clipboardOwnerJson(); }
 static json clipboardGet(const json&) {
     if (!OpenClipboard(nullptr)) throw std::runtime_error("clipboard busy");
+    // owner and content are taken while we hold the clipboard open, so nobody can swap the data in between
+    json out = clipboardOwnerJson();
     std::string text; bool has = false;
     if (HANDLE h = GetClipboardData(CF_UNICODETEXT)) { auto* p = (wchar_t*)GlobalLock(h); if (p) { text = w2u(p); has = true; GlobalUnlock(h); } }
     CloseClipboard();
-    json out = clipboardOwnerJson(); out["text"] = text; out["hasText"] = has;
+    out["text"] = text; out["hasText"] = has;
     return out;
 }
 static json clipboardSet(const json& a) {

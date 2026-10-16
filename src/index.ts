@@ -92,7 +92,7 @@ async function main(): Promise<void> {
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== "EADDRINUSE") throw e;
       // an MCP instance already serves the panel: just open its link instead of failing
-      const other = (await probePanel(port))?.deskdock ? runningPanel() : null;
+      const other = await runningPanel(); // checks panel.json AND that its port answers as DeskDock
       if (!other) { process.stderr.write(lang === "zh" ? `端口 ${port} 被别的程序占用。用 --port 换一个，或给所有客户端设置环境变量 DESKDOCK_PANEL_PORT。\n` : `Port ${port} is used by another program. Use --port, or set DESKDOCK_PANEL_PORT for every client.\n`); process.exit(1); }
       url = other.url;
     }

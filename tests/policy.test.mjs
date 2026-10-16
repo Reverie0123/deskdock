@@ -20,7 +20,10 @@ test("default levels by process name and title", () => {
   assert.equal(store.levelFor("notepad.exe", "policy.json - Notepad"), "read", "the model cannot edit its own permission table");
   assert.equal(store.levelFor("chrome.exe", "DeskDock"), "read", "nor use the control panel through a browser");
   assert.equal(store.levelFor("firefox.exe", "DeskDock"), "read");
-  assert.equal(store.levelFor("chrome.exe", "招商银行 - 个人银行 - Google Chrome"), "block", "banks inside a browser are blocked by title");
+  assert.equal(store.levelFor("chrome.exe", "招商银行 - 个人网银 - Google Chrome"), "block", "online banking inside a browser is blocked by title");
+  assert.equal(store.levelFor("chrome.exe", "招商银行招聘 - Google Chrome"), "read", "a bank NAME alone only caps at read");
+  assert.equal(store.levelFor("code.exe", "bank.ts - myproject - Visual Studio Code"), "click", "no generic bank/banking substring rule: the editor keeps its own level");
+  assert.equal(store.levelFor("chrome.exe", "Banking news - Chrome"), "read");
   assert.equal(store.levelFor("explorer.exe", "Ausführen", "#32770"), "click", "the Run box is recognised by window class in any language");
   assert.equal(store.levelFor("explorer.exe", "C:\\ - Properties", "#32770"), "click");
   rmSync(dir, { recursive: true, force: true });

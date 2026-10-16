@@ -7,7 +7,7 @@ import { PolicyStore, policyPath } from "./policy.js";
 import { Audit } from "./audit.js";
 import { registerTools } from "./tools.js";
 import { Ocr } from "./ocr.js";
-import { startPanel } from "./panel.js";
+import { startPanel, probePanel, runningPanel, DEFAULT_PANEL_PORT } from "./panel.js";
 import { MacroStore } from "./macros.js";
 import { spawn } from "node:child_process";
 import { runSetup, formatResults } from "./setup.js";
@@ -83,10 +83,22 @@ async function main(): Promise<void> {
   if (cmd === "panel") {
     const policy = new PolicyStore(); policy.ensureFile();
     const portArg = argv.indexOf("--port");
-    const panel = await startPanel({ policy, version: VERSION, port: portArg >= 0 ? Number(argv[portArg + 1]) : undefined, macros: new MacroStore() });
-    process.stdout.write((lang === "zh" ? "控制面板: " : "Control panel: ") + panel.url + (lang === "zh" ? "  （Ctrl+C 退出）\n" : "  (Ctrl+C to stop)\n"));
-    if (!argv.includes("--no-open")) spawn("cmd.exe", ["/c", "start", "", panel.url], { detached: true, stdio: "ignore" }).unref();
-    await new Promise(() => { /* run until killed */ });
+    const port = portArg >= 0 ? Number(argv[portArg + 1]) : DEFAULT_PANEL_PORT;
+    let url: string;
+    let serving = false;
+    try {
+      const panel = await startPanel({ policy, version: VERSION, port, macros: new MacroStore() });
+      url = panel.url; serving = true;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EADDRINUSE") throw e;
+      // an MCP instance already serves the panel: just open its link instead of failing
+      const other = (await probePanel(port))?.deskdock ? runningPanel() : null;
+      if (!other) { process.stderr.write(lang === "zh" ? `端口 ${port} 被别的程序占用。用 --port 换一个，或给所有客户端设置环境变量 DESKDOCK_PANEL_PORT。\n` : `Port ${port} is used by another program. Use --port, or set DESKDOCK_PANEL_PORT for every client.\n`); process.exit(1); }
+      url = other.url;
+    }
+    process.stdout.write((lang === "zh" ? "控制面板: " : "Control panel: ") + url + (serving ? (lang === "zh" ? "  （Ctrl+C 退出）\n" : "  (Ctrl+C to stop)\n") : (lang === "zh" ? "  （由正在运行的 DeskDock 提供）\n" : "  (served by the running DeskDock)\n")));
+    if (!argv.includes("--no-open")) spawn("cmd.exe", ["/c", "start", "", url], { detached: true, stdio: "ignore" }).unref();
+    if (serving) await new Promise(() => { /* run until killed */ });
     return;
   }
   if (cmd === "setup") {
@@ -109,7 +121,13 @@ async function main(): Promise<void> {
   await server.connect(transport);
   let panelUrl = "";
   try { const panel = await startPanel({ policy, version: VERSION, macros }); panelUrl = panel.url; }
-  catch (e) { process.stderr.write((e as NodeJS.ErrnoException).code === "EADDRINUSE" ? "DeskDock: control panel already served by another instance\n" : `DeskDock: control panel not started: ${(e as Error).message}\n`); }
+  catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "EADDRINUSE") {
+      const probe = await probePanel(DEFAULT_PANEL_PORT);
+      process.stderr.write(probe?.deskdock ? "DeskDock: control panel already served by another DeskDock instance (see panel.json)\n"
+        : `DeskDock: port ${DEFAULT_PANEL_PORT} is used by another program, so the control panel is off; set DESKDOCK_PANEL_PORT=<free port> for every AI client to move it\n`);
+    } else process.stderr.write(`DeskDock: control panel not started: ${(e as Error).message}\n`);
+  }
   process.stderr.write(`DeskDock ${VERSION} ready (policy: ${policyPath()}${panelUrl ? `, panel: ${panelUrl}` : ""})\n`);
 }
 

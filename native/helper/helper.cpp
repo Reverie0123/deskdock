@@ -4,7 +4,11 @@
 //   response: {"id":1,"ok":true,"result":{...}} | {"id":1,"ok":false,"error":"..."}
 #include <algorithm>
 using std::min; using std::max;
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0A00 // TaskDialog declarations need Vista+ headers; older mingw-w64 defaults lower
+#endif
 #include <windows.h>
+#include <commctrl.h>
 #include <objidl.h>
 #include <gdiplus.h>
 #include <uiautomation.h>
@@ -192,7 +196,7 @@ static json screenshot(const json& a) {
     HWND h = hwndArg(a);
     double scale = a.value("scale", 1.0);
     if (scale <= 0 || scale > 1) scale = 1.0;
-    CLSID png; if (encoderClsid(L"image/png", &png) < 0) throw std::runtime_error("png encoder missing"); // before any GDI allocation
+    CLSID png; if (encoderClsid(L"image/png", &png) < 0) throw std::runtime_error("png encoder missing");
     RECT r;
     if (h) r = frameRect(h);
     else r = { GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN),
@@ -200,42 +204,61 @@ static json screenshot(const json& a) {
                GetSystemMetrics(SM_YVIRTUALSCREEN) + GetSystemMetrics(SM_CYVIRTUALSCREEN) };
     int w = r.right - r.left, hgt = r.bottom - r.top;
     if (w <= 0 || hgt <= 0) throw std::runtime_error("window has no visible area (minimized?)");
-    HDC screen = GetDC(nullptr); HDC mem = CreateCompatibleDC(screen);
-    HBITMAP bmp = CreateCompatibleBitmap(screen, w, hgt); HGDIOBJ old = SelectObject(mem, bmp);
+    // Everything allocated below is owned by this guard, so any throw on the way out releases it.
+    struct Guard {
+        HDC screen = nullptr, mem = nullptr; HBITMAP bmp = nullptr; HGDIOBJ old = nullptr;
+        Gdiplus::Bitmap* src = nullptr; Gdiplus::Bitmap* img = nullptr; IStream* stream = nullptr;
+        ~Guard() {
+            if (img && img != src) delete img;
+            delete src;
+            if (stream) stream->Release();
+            if (mem) { if (old) SelectObject(mem, old); DeleteDC(mem); }
+            if (bmp) DeleteObject(bmp);
+            if (screen) ReleaseDC(nullptr, screen);
+        }
+    } g;
+    g.screen = GetDC(nullptr); g.mem = CreateCompatibleDC(g.screen);
+    g.bmp = CreateCompatibleBitmap(g.screen, w, hgt);
+    if (!g.mem || !g.bmp) throw std::runtime_error("GDI allocation failed");
+    g.old = SelectObject(g.mem, g.bmp);
     bool ok = false;
     if (h) {
         // PW_RENDERFULLCONTENT (2) captures DirectComposition / GPU-rendered windows too.
-        ok = PrintWindow(h, mem, 2) != 0;
+        ok = PrintWindow(h, g.mem, 2) != 0;
         // PrintWindow draws relative to the window rect, not the DWM frame rect; realign if they differ.
         RECT wr; GetWindowRect(h, &wr);
         if (ok && (wr.left != r.left || wr.top != r.top)) {
-            HBITMAP bmp2 = CreateCompatibleBitmap(screen, w, hgt); HDC mem2 = CreateCompatibleDC(screen); HGDIOBJ o2 = SelectObject(mem2, bmp2);
-            BitBlt(mem2, 0, 0, w, hgt, mem, r.left - wr.left, r.top - wr.top, SRCCOPY);
-            SelectObject(mem2, o2); DeleteDC(mem2); SelectObject(mem, old); DeleteObject(bmp); bmp = bmp2; old = SelectObject(mem, bmp);
+            HBITMAP bmp2 = CreateCompatibleBitmap(g.screen, w, hgt); HDC mem2 = CreateCompatibleDC(g.screen);
+            if (bmp2 && mem2) {
+                HGDIOBJ o2 = SelectObject(mem2, bmp2);
+                BitBlt(mem2, 0, 0, w, hgt, g.mem, r.left - wr.left, r.top - wr.top, SRCCOPY);
+                SelectObject(mem2, o2);
+                SelectObject(g.mem, g.old); DeleteObject(g.bmp); g.bmp = bmp2; g.old = SelectObject(g.mem, g.bmp);
+            } else if (bmp2) DeleteObject(bmp2);
+            if (mem2) DeleteDC(mem2);
         }
     }
     // a window capture never falls back to copying the screen area: that would include whatever is stacked on top
-    if (!ok && !h) ok = BitBlt(mem, 0, 0, w, hgt, screen, r.left, r.top, SRCCOPY | CAPTUREBLT) != 0;
-    SelectObject(mem, old); DeleteDC(mem); ReleaseDC(nullptr, screen);
-    if (!ok) { DeleteObject(bmp); throw std::runtime_error(h ? "window capture failed (PrintWindow refused; focus the window and retry, or use screenshot without hwnd)" : "capture failed"); }
+    if (!ok && !h) ok = BitBlt(g.mem, 0, 0, w, hgt, g.screen, r.left, r.top, SRCCOPY | CAPTUREBLT) != 0;
+    SelectObject(g.mem, g.old); g.old = nullptr;
+    if (!ok) throw std::runtime_error(h ? "window capture failed (PrintWindow refused; focus the window and retry, or use screenshot without hwnd)" : "capture failed");
 
-    Gdiplus::Bitmap* src = Gdiplus::Bitmap::FromHBITMAP(bmp, nullptr);
-    Gdiplus::Bitmap* img = src;
+    g.src = Gdiplus::Bitmap::FromHBITMAP(g.bmp, nullptr);
+    if (!g.src) throw std::runtime_error("bitmap conversion failed");
+    g.img = g.src;
     int ow = w, oh = hgt;
     if (scale < 1.0) {
         ow = max(1, (int)(w * scale)); oh = max(1, (int)(hgt * scale));
-        img = new Gdiplus::Bitmap(ow, oh, PixelFormat24bppRGB);
-        Gdiplus::Graphics g(img); g.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic); g.DrawImage(src, 0, 0, ow, oh);
+        g.img = new Gdiplus::Bitmap(ow, oh, PixelFormat24bppRGB);
+        Gdiplus::Graphics gr(g.img); gr.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic); gr.DrawImage(g.src, 0, 0, ow, oh);
     }
-    IStream* stream = nullptr; CreateStreamOnHGlobal(nullptr, TRUE, &stream);
-    img->Save(stream, &png, nullptr);
-    HGLOBAL hg = nullptr; GetHGlobalFromStream(stream, &hg);
-    STATSTG st{}; stream->Stat(&st, STATFLAG_NONAME); size_t len = (size_t)st.cbSize.QuadPart;
+    if (FAILED(CreateStreamOnHGlobal(nullptr, TRUE, &g.stream)) || !g.stream) throw std::runtime_error("stream allocation failed");
+    if (g.img->Save(g.stream, &png, nullptr) != Gdiplus::Ok) throw std::runtime_error("png encoding failed");
+    HGLOBAL hg = nullptr; GetHGlobalFromStream(g.stream, &hg);
+    STATSTG st{}; g.stream->Stat(&st, STATFLAG_NONAME); size_t len = (size_t)st.cbSize.QuadPart;
     auto* p = (unsigned char*)GlobalLock(hg);
     std::string b64 = base64(p, len);
-    GlobalUnlock(hg); stream->Release();
-    if (img != src) delete img;
-    delete src; DeleteObject(bmp);
+    GlobalUnlock(hg);
     return {{"png_base64", b64}, {"width", ow}, {"height", oh}, {"origin", {{"x", r.left}, {"y", r.top}}}, {"scale", scale}};
 }
 
@@ -383,11 +406,13 @@ static json pressKeys(const json& a) {
     }
     return {{"keys", combo}, {"repeat", repeat}};
 }
+static std::atomic<DWORD> g_ownClipSeq{0}; // clipboard sequence number right after our own clipboard_set
 // The process that last wrote the clipboard: Windows keeps the owner window as long as that app is alive.
 static json clipboardOwnerJson() {
     HWND owner = GetClipboardOwner(); DWORD pid = 0; std::string title;
     if (owner) { GetWindowThreadProcessId(owner, &pid); wchar_t t[256] = L""; GetWindowTextW(GetAncestor(owner, GA_ROOT), t, 256); title = w2u(t); }
-    return {{"ownerProcess", pid ? processName(pid) : ""}, {"ownerTitle", title}, {"ownerHwnd", (long long)(intptr_t)(owner ? GetAncestor(owner, GA_ROOT) : nullptr)}};
+    bool ownSet = g_ownClipSeq.load() != 0 && GetClipboardSequenceNumber() == g_ownClipSeq.load();
+    return {{"ownerProcess", pid ? processName(pid) : ""}, {"ownerTitle", title}, {"ownerHwnd", (long long)(intptr_t)(owner ? GetAncestor(owner, GA_ROOT) : nullptr)}, {"ownSet", ownSet}};
 }
 static json clipboardOwner(const json&) { return clipboardOwnerJson(); }
 static json clipboardGet(const json&) {
@@ -406,6 +431,7 @@ static json clipboardSet(const json& a) {
     HGLOBAL hg = GlobalAlloc(GMEM_MOVEABLE, (w.size() + 1) * sizeof(wchar_t));
     memcpy(GlobalLock(hg), w.c_str(), (w.size() + 1) * sizeof(wchar_t)); GlobalUnlock(hg);
     SetClipboardData(CF_UNICODETEXT, hg); CloseClipboard();
+    g_ownClipSeq = GetClipboardSequenceNumber();
     return {{"chars", (long long)w.size()}};
 }
 static json cursorPos(const json&) { POINT p; GetCursorPos(&p); return {{"x", p.x}, {"y", p.y}}; }
@@ -707,21 +733,81 @@ static json uiaAction(const json& a, const std::string& action) {
 
 // ---------- user confirmation (policy level "ask") ----------
 typedef int (WINAPI* MessageBoxTimeoutW_t)(HWND, LPCWSTR, LPCWSTR, UINT, WORD, DWORD);
+struct ConfirmCb { int timeoutMs; bool zh; bool timedOut = false; int lastShown = -1; };
+static HRESULT CALLBACK confirmCallback(HWND hwnd, UINT msg, WPARAM wParam, LPARAM, LONG_PTR data) {
+    auto* cb = (ConfirmCb*)data;
+    if (msg == TDN_CREATED) {
+        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        if (GetForegroundWindow() != hwnd) SwitchToThisWindow(hwnd, TRUE);
+    } else if (msg == TDN_TIMER) {
+        int left = (cb->timeoutMs - (int)wParam + 999) / 1000;
+        if (left <= 0) { cb->timedOut = true; SendMessageW(hwnd, TDM_CLICK_BUTTON, IDNO, 0); return S_OK; }
+        if (left != cb->lastShown) {
+            cb->lastShown = left;
+            std::wstring footer = cb->zh ? std::to_wstring(left) + L" 秒内不选择视为拒绝" : std::to_wstring(left) + L" s left; no choice counts as deny";
+            SendMessageW(hwnd, TDM_SET_ELEMENT_TEXT, TDE_FOOTER, (LPARAM)footer.c_str());
+        }
+    }
+    return S_OK;
+}
+typedef HRESULT(WINAPI* TaskDialogIndirect_t)(const TASKDIALOGCONFIG*, int*, int*, BOOL*);
 static json confirm(const json& a) {
     std::wstring text = u2w(a.value("text", "")), title = u2w(a.value("title", "DeskDock"));
     int timeoutMs = a.value("timeoutMs", 30000);
+    bool zh = a.value("lang", "en") == "zh";
+    const int ID_ONCE = 101, ID_SESSION = 102;
+
+    // 1) TaskDialog (needs the comctl32 v6 manifest; loaded dynamically so an old system just skips it)
+    static TaskDialogIndirect_t tdi = [] { HMODULE m = LoadLibraryW(L"comctl32.dll"); return m ? (TaskDialogIndirect_t)GetProcAddress(m, "TaskDialogIndirect") : nullptr; }();
+    if (tdi) {
+        std::wstring once = zh ? L"允许一次" : L"Allow once";
+        std::wstring session = zh ? L"本程序以后都允许\n到这个 AI 客户端关闭为止。想永久放行，在控制面板把它设成「完全」。"
+                                  : L"Allow this app from now on\nUntil this AI client exits. To allow it permanently, set the app to \"full\" in the control panel.";
+        std::wstring deny = zh ? L"拒绝" : L"Deny";
+        std::wstring instruction = zh ? L"允许 AI 执行这个操作吗？" : L"Allow the AI to do this?";
+        std::wstring footer = zh ? std::to_wstring(timeoutMs / 1000) + L" 秒内不选择视为拒绝" : std::to_wstring(timeoutMs / 1000) + L" s left; no choice counts as deny";
+        TASKDIALOG_BUTTON buttons[] = { { ID_ONCE, once.c_str() }, { ID_SESSION, session.c_str() }, { IDNO, deny.c_str() } };
+        ConfirmCb cb{ timeoutMs, zh };
+        TASKDIALOGCONFIG cfg{}; cfg.cbSize = sizeof cfg;
+        cfg.dwFlags = TDF_USE_COMMAND_LINKS | TDF_CALLBACK_TIMER | TDF_ALLOW_DIALOG_CANCELLATION | TDF_SIZE_TO_CONTENT;
+        cfg.pszWindowTitle = title.c_str(); cfg.pszMainIcon = TD_SHIELD_ICON;
+        cfg.pszMainInstruction = instruction.c_str(); cfg.pszContent = text.c_str(); cfg.pszFooter = footer.c_str();
+        cfg.cButtons = 3; cfg.pButtons = buttons; cfg.nDefaultButton = IDNO;
+        cfg.pfCallback = confirmCallback; cfg.lpCallbackData = (LONG_PTR)&cb;
+        int pressed = 0;
+        if (SUCCEEDED(tdi(&cfg, &pressed, nullptr, nullptr))) {
+            std::string answer = pressed == ID_ONCE ? "yes" : pressed == ID_SESSION ? "yes_all" : cb.timedOut ? "timeout" : "no";
+            return {{"answer", answer}, {"ui", "taskdialog"}};
+        }
+    }
+
+    // 2) plain message box: yes / no, Shift+Yes = allow the app for the session
+    std::wstring hint = zh ? L"\n\n允许吗？（" + std::to_wstring(timeoutMs / 1000) + L" 秒不回答视为拒绝；按住 Shift 点「是」= 本程序本次会话全部允许）"
+                           : L"\n\nAllow? (no answer within " + std::to_wstring(timeoutMs / 1000) + L" s = no; Shift+Yes = allow everything in this app for this session)";
+    std::wstring full = text + hint;
     static MessageBoxTimeoutW_t mbt = (MessageBoxTimeoutW_t)GetProcAddress(GetModuleHandleW(L"user32.dll"), "MessageBoxTimeoutW");
     int r;
     auto timedOut = std::make_shared<std::atomic<bool>>(false);
-    if (mbt) r = mbt(nullptr, text.c_str(), title.c_str(), MB_YESNO | MB_ICONQUESTION | MB_TOPMOST | MB_SETFOREGROUND | MB_DEFBUTTON2, 0, (DWORD)timeoutMs);
+    if (mbt) r = mbt(nullptr, full.c_str(), title.c_str(), MB_YESNO | MB_ICONQUESTION | MB_TOPMOST | MB_SETFOREGROUND | MB_DEFBUTTON2, 0, (DWORD)timeoutMs);
     else {
-        // no MessageBoxTimeoutW: a watchdog thread presses "No" on our own box when the time is up
-        std::thread([title, timeoutMs, timedOut]() { Sleep(timeoutMs); HWND box = FindWindowW(L"#32770", title.c_str()); if (box) { timedOut->store(true); PostMessageW(box, WM_COMMAND, IDNO, 0); } }).detach();
-        r = MessageBoxW(nullptr, text.c_str(), title.c_str(), MB_YESNO | MB_ICONQUESTION | MB_TOPMOST | MB_SETFOREGROUND | MB_DEFBUTTON2);
+        // 3) no MessageBoxTimeoutW either: a watchdog presses "No" on OUR box. It locates the box by this thread's
+        // windows (not by title), and stops as soon as the box is answered, so it can never hit a later dialog.
+        auto done = std::make_shared<std::atomic<bool>>(false);
+        DWORD tid = GetCurrentThreadId();
+        std::thread([tid, timeoutMs, timedOut, done]() {
+            HWND box = nullptr; int waited = 0;
+            while (!done->load() && waited < timeoutMs) {
+                Sleep(100); waited += 100;
+                if (!box) EnumThreadWindows(tid, [](HWND w, LPARAM p) -> BOOL { wchar_t c[16] = L""; GetClassNameW(w, c, 16); if (wcscmp(c, L"#32770") == 0) { *(HWND*)p = w; return FALSE; } return TRUE; }, (LPARAM)&box);
+            }
+            if (!done->load() && box && IsWindow(box)) { timedOut->store(true); PostMessageW(box, WM_COMMAND, IDNO, 0); }
+        }).detach();
+        r = MessageBoxW(nullptr, full.c_str(), title.c_str(), MB_YESNO | MB_ICONQUESTION | MB_TOPMOST | MB_SETFOREGROUND | MB_DEFBUTTON2);
+        done->store(true);
     }
-    bool shiftHeld = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0; // Shift+Yes = allow everything in this app for the rest of the session
+    bool shiftHeld = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
     std::string answer = r == IDYES ? (shiftHeld ? "yes_all" : "yes") : r == IDNO ? (timedOut->load() ? "timeout" : "no") : "timeout";
-    return {{"answer", answer}};
+    return {{"answer", answer}, {"ui", "messagebox"}};
 }
 
 // ---------- main loop ----------

@@ -50,6 +50,14 @@ test("clipboard_get is judged by the app that wrote the clipboard, not the one i
   assert.equal(r.err, true); assert.match(r.text, /bank\.exe/);
   await helper.call("set_clip_owner", { ownerProcess: "notepad.exe", ownerTitle: "notes", ownerHwnd: 2 });
   assert.equal((await call("clipboard_get")).err, false);
+  // the copying app has exited: no owner, refuse instead of guessing from the foreground window
+  await helper.call("set_clip_owner", { ownerProcess: "", ownerTitle: "", ownerHwnd: 0 });
+  const gone = await call("clipboard_get");
+  assert.equal(gone.err, true); assert.match(gone.text, /no longer running/);
+  // ...unless DeskDock itself wrote it
+  await helper.call("set_clip_owner", { ownerProcess: "", ownerTitle: "", ownerHwnd: 0, ownSet: true });
+  assert.equal((await call("clipboard_get")).err, false);
+  await helper.call("set_clip_owner", { ownerProcess: "notepad.exe", ownerTitle: "notes", ownerHwnd: 2 });
 });
 
 test("a blocked app with only a title-less window still blocks full-screen capture", async () => {

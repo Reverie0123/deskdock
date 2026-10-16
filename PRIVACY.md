@@ -4,7 +4,7 @@ English first, 中文在后。
 
 ## What DeskDock sends over the network
 
-Nothing. DeskDock opens no outbound connection. The only socket it ever creates is the local control panel on `127.0.0.1`, on fixed port 17337, protected by a token (stored only in your own `%APPDATA%\deskdock\panel-token`) and a Host check. You can verify this: block `node.exe` and `deskdock-helper.exe` in Windows Firewall; every feature keeps working.
+Nothing. DeskDock opens no outbound connection. The only socket it ever creates is the local control panel on `127.0.0.1`, on fixed port 17337, protected by a token that is new for every run (written only to your own `%APPDATA%\deskdock\panel.json`) and a Host check. You can verify this: block `node.exe` and `deskdock-helper.exe` in Windows Firewall; every feature keeps working.
 
 ## Where your screen content goes anyway
 
@@ -16,7 +16,7 @@ DeskDock is a collector. What it reads is handed to **your AI client** (Claude C
 | UI tree of a window (control names, values, text) | `read_window` | yes | no |
 | Screenshot | `screenshot` | yes | no (never written to disk) |
 | OCR text | `read_screen_text` | yes | the temporary PNG is deleted right after recognition |
-| Clipboard text | `clipboard_get` | yes | no |
+| Clipboard text | `clipboard_get` (allowed by the level of the app that copied it; refused if that app has exited) | yes | no |
 | Text you ask the model to type | `type`, `set_value`, `clipboard_set` | it came from the model | audit log keeps only the character count; a **macro** file never keeps recorded text (it is turned into a parameter) |
 | Tool calls themselves | every call | no | audit log: `%APPDATA%\deskdock\logs\*.jsonl` (time, tool, arguments, target window, outcome) |
 
@@ -47,7 +47,7 @@ Uninstall with `npx deskdock setup --remove`, then delete `%APPDATA%\deskdock` (
 
 ## DeskDock 往网络上发什么
 
-什么都不发。DeskDock 不发起任何对外连接。它唯一创建的网络端口是 `127.0.0.1` 上的本地控制面板，固定端口 17337，带令牌（只存在你自己的 `%APPDATA%\deskdock\panel-token` 里）和 Host 校验。你可以自己验证：在 Windows 防火墙里禁止 `node.exe` 和 `deskdock-helper.exe` 联网，所有功能照常。
+什么都不发。DeskDock 不发起任何对外连接。它唯一创建的网络端口是 `127.0.0.1` 上的本地控制面板，固定端口 17337，带每次运行重新生成的令牌（只写进你自己的 `%APPDATA%\deskdock\panel.json`）和 Host 校验。你可以自己验证：在 Windows 防火墙里禁止 `node.exe` 和 `deskdock-helper.exe` 联网，所有功能照常。
 
 ## 那你的屏幕内容去了哪
 
@@ -59,7 +59,7 @@ DeskDock 是个采集器。它读到的东西交给**你的 AI 客户端**（Cla
 | 窗口控件树（控件名、值、文字） | `read_window` | 会 | 不 |
 | 截图 | `screenshot` | 会 | 不（从不写盘） |
 | OCR 文字 | `read_screen_text` | 会 | 临时图片识别完立即删除 |
-| 剪贴板文字 | `clipboard_get` | 会 | 不 |
+| 剪贴板文字 | `clipboard_get`（按复制它的程序的级别判断；那个程序已关闭则拒绝） | 会 | 不 |
 | 模型让它输入的文字 | `type`、`set_value`、`clipboard_set` | 本来就来自模型 | 审计日志只记字数；**宏**文件不保留录制时的原文（自动变成参数） |
 | 工具调用本身 | 每次调用 | 不 | 审计日志 `%APPDATA%\deskdock\logs\*.jsonl`（时间、工具、参数、目标窗口、结果） |
 

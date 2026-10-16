@@ -29,13 +29,17 @@ export const DEFAULT_POLICY: Policy = {
     "1password.exe": "block", "bitwarden.exe": "block", "keepass.exe": "block", "keepassxc.exe": "block",
     "alipay.exe": "block", "alipaysecsvc.exe": "block", "wechatpay.exe": "block",
     "title:网上银行": "block", "title:online banking": "block", "title:密码管理": "block",
-    // banks, brokers and payment sites in a browser (the browser itself is only "read", which still lets the model see the page)
-    "title:个人网银": "block", "title:企业网银": "block", "title:工商银行": "block", "title:建设银行": "block", "title:农业银行": "block", "title:中国银行": "block", "title:招商银行": "block", "title:交通银行": "block", "title:邮储银行": "block", "title:邮政储蓄": "block", "title:浦发银行": "block", "title:兴业银行": "block", "title:民生银行": "block", "title:中信银行": "block", "title:光大银行": "block", "title:平安银行": "block", "title:华夏银行": "block", "title:广发银行": "block", "title:支付宝": "block", "title:微信支付": "block", "title:财付通": "block", "title:云闪付": "block", "title:证券": "block", "title:同花顺": "block", "title:东方财富": "block", "title:富途": "block", "title:老虎证券": "block",
-    "title: bank": "block", "title:bank of": "block", "title:banking": "block", "title:paypal": "block", "title:coinbase": "block", "title:binance": "block", "title:brokerage": "block", "title:robinhood": "block", "title:wise.com": "block", "title:revolut": "block",
+    // Payment and finance. Precise phrases are blocked outright. Bare bank and broker NAMES are only "read": a news
+    // headline, a job ad or a repository called bank-something would otherwise lock the model out of your editor or
+    // browser, and the browser is read-only anyway. Delete or change any of these in the control panel.
+    "title:个人网银": "block", "title:企业网银": "block", "title:网银登录": "block", "title:支付宝": "block", "title:微信支付": "block", "title:财付通": "block", "title:云闪付": "block",
+    "title:同花顺": "block", "title:东方财富": "block", "title:富途牛牛": "block", "title:老虎证券": "block",
+    "title:paypal": "block", "title:coinbase": "block", "title:binance": "block", "title:robinhood": "block", "title:revolut": "block", "title:wise.com": "block",
+    "title:工商银行": "read", "title:建设银行": "read", "title:农业银行": "read", "title:中国银行": "read", "title:招商银行": "read", "title:交通银行": "read", "title:邮储银行": "read", "title:邮政储蓄": "read", "title:浦发银行": "read", "title:兴业银行": "read", "title:民生银行": "read", "title:中信银行": "read", "title:光大银行": "read", "title:平安银行": "read", "title:华夏银行": "read", "title:广发银行": "read", "title:证券": "read",
     // the Win+R Run box is an explorer.exe dialog: let the model see it but not type a command into it (any UI language)
     "class:#32770@explorer.exe": "click", "title=运行": "click", "title=run": "click",
     // our own files: never let the model edit the permission table or read the panel token
-    "title:panel.json": "read", "title:panel-token": "block",
+    "title:panel.json": "read",
     // ourselves and the OS security surface
     "logonui.exe": "block", "consent.exe": "block", "credentialuihost.exe": "block",
     // the model must not edit its own permission table: any window showing the policy file or the control panel is read-only

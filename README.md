@@ -20,7 +20,7 @@ Either way, DeskDock is written into the MCP settings of every selected client. 
 
 - **Installs in one line, needs nothing else.** A single executable plus Node. No Python, no .NET runtime, no model download.
 - **Reads windows as text, not pixels.** Controls come back as `[ref] button "Save"` lines with exact screen rects. Clicking by ref survives window moves, DPI changes and multiple monitors. A screenshot is the fallback, not the default.
-- **You decide what it may touch.** Every app gets a level: block, read, click, ask (a yes/no dialog before each action) or full. Apps without a rule **ask** before every action (Shift+Yes allows an app for the session); browsers are read-only, terminals and IDEs click-only, password managers, banks and payment apps blocked. The target window is re-checked by the native engine in the same step as the input, so a focus change between the decision and the action is refused. Denied actions are explained to the model so it asks you instead of guessing.
+- **You decide what it may touch.** Every app gets a level: block, read, click, ask (a yes/no dialog before each action) or full. Apps without a rule **ask** before every action, with three buttons: allow once, allow this app until the client exits, deny; browsers are read-only, terminals and IDEs click-only, password managers, banks and payment apps blocked. The target window is re-checked by the native engine in the same step as the input, so a focus change between the decision and the action is refused. Denied actions are explained to the model so it asks you instead of guessing.
 - **Chinese and English throughout.** Tool descriptions, errors and the setup command follow your system language, and the built-in Windows OCR reads Chinese UI text out of the box.
 
 ## How it compares
@@ -98,7 +98,7 @@ Note that `read` still lets the model see what is on screen in that app, includi
 
 ## Control panel and tray
 
-`deskdock panel` opens a local page (127.0.0.1 only, port 17337; one panel is shared by every DeskDock instance on the machine) where you edit the permission table, browse the audit log by day, filter by tool or outcome, and replay a session step by step on a timeline. The MCP server also starts the panel in the background whenever a client launches it.
+`deskdock panel` opens a local page (127.0.0.1 only, port 17337 or `DESKDOCK_PANEL_PORT`; one panel is shared by every DeskDock instance on the machine) where you edit the permission table, browse the audit log by day, filter by tool or outcome, and replay a session step by step on a timeline. The MCP server also starts the panel in the background whenever a client launches it.
 
 Double-clicking `resources/deskdock-native.exe` (the same file the server uses as its engine) puts an icon in the notification area: open the panel, open the log folder, exit, and **Pause DeskDock**. While paused, every tool call is refused with a message telling the model to ask you to resume. Pause state is a marker file in `%APPDATA%\deskdock`, so it works even when the panel is not open.
 

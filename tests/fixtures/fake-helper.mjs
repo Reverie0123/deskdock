@@ -21,7 +21,7 @@ rl.on("line", (line) => {
     case "fail": return err("simulated failure");
     case "ping": return reply({ pong: true, pid: process.pid });
     case "list_windows": return reply(a.all ? [...WINDOWS, { hwnd: 3, title: "", class: "Popup", pid: 11, process: "bank.exe", rect: rect(900, 0, 300, 200), minimized: false, focused: false }] : WINDOWS);
-    case "clipboard_owner": return reply(globalThis.__clipOwner ?? { ownerProcess: "notepad.exe", ownerTitle: "notes.txt - Notepad", ownerHwnd: 2 });
+    case "clipboard_owner": return reply({ ownSet: false, ...(globalThis.__clipOwner ?? { ownerProcess: "notepad.exe", ownerTitle: "notes.txt - Notepad", ownerHwnd: 2 }) });
     case "set_clip_owner": globalThis.__clipOwner = a; return reply({ ok: true });
     case "foreground_window": return reply(WINDOWS[1]);
     case "window_at": return reply(a.x < 50 ? WINDOWS[0] : WINDOWS[1]); // the bank window sits at the left edge

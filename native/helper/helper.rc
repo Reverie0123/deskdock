@@ -3,6 +3,8 @@
 #include <windows.h>
 
 1 ICON "../../resources/deskdock.ico"
+// RT_MANIFEST: common controls v6 (TaskDialog for the "ask" box) and per-monitor DPI awareness
+1 24 "deskdock.manifest"
 
 VS_VERSION_INFO VERSIONINFO
 FILEVERSION     0,1,0,0

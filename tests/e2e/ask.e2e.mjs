@@ -50,21 +50,28 @@ try {
   if (!tab) throw new Error("notepad did not open");
   const hwnd = hwndOf(tab);
   // focus_window on an ask-level app asks too: answer yes
-  const focusP = call("focus_window", { hwnd }); await answerDialog("是|Yes"); log("focus:", (await focusP).text.slice(0, 60));
+  const focusP = call("focus_window", { hwnd }); await answerDialog("允许一次|Allow once"); log("focus:", (await focusP).text.slice(0, 60));
   await sleep(300);
   const tree = (await call("read_window", { hwnd })).text; // reads never ask
   const edit = tree.split("\n").find((l) => /\]\s+(document|edit)\b/.test(l));
-  const clickP = call("click", { ref: Number(/\[(\d+)\]/.exec(edit)[1]) }); await answerDialog("是|Yes"); log("click:", (await clickP).text.slice(0, 60));
+  const clickP = call("click", { ref: Number(/\[(\d+)\]/.exec(edit)[1]) }); await answerDialog("允许一次|Allow once"); log("click:", (await clickP).text.slice(0, 60));
   await sleep(200);
-  const typeP = call("type", { text: "ASK-YES" }); await answerDialog("是|Yes"); const t1 = await typeP; log("type (yes):", t1.err ? "ERR " + t1.text : t1.text.slice(0, 60));
+  const typeP = call("type", { text: "ASK-YES" }); await answerDialog("允许一次|Allow once"); const t1 = await typeP; log("type (yes):", t1.err ? "ERR " + t1.text : t1.text.slice(0, 60));
   if (t1.err) throw new Error("type after yes failed");
-  const typeP2 = call("type", { text: "ASK-NO" }); await answerDialog("否|No"); const t2 = await typeP2; log("type (no):", t2.text.slice(0, 90));
+  const typeP2 = call("type", { text: "ASK-NO" }); await answerDialog("^拒绝|^Deny"); const t2 = await typeP2; log("type (no):", t2.text.slice(0, 90));
   if (!t2.err || !/declined/.test(t2.text)) throw new Error("declined type was not refused");
-  const saveP = call("key", { keys: "ctrl+s" }); await answerDialog("是|Yes"); await saveP; await sleep(500);
+  const saveP = call("key", { keys: "ctrl+s" }); await answerDialog("允许一次|Allow once"); await saveP; await sleep(500);
+  // "allow this app from now on": the next action must go through without any dialog
+  const typeP3 = call("type", { text: "-ALL" }); await answerDialog("以后都允许|from now on"); const t3 = await typeP3; log("type (allow app):", t3.err ? "ERR " + t3.text : t3.text.slice(0, 60));
+  if (t3.err) throw new Error("type after allow-app failed");
+  const saveP2 = call("key", { keys: "ctrl+s" });
+  const r2 = await Promise.race([saveP2, sleep(8000).then(() => null)]);
+  if (!r2) throw new Error("a dialog still appeared after allowing the app for the session");
+  log("save without dialog:", r2.text.slice(0, 60)); await sleep(500);
   const written = readFileSync(file, "utf8").replace(/^﻿/, "").trim();
   log("written:", JSON.stringify(written));
-  if (written !== "ASK-YES") throw new Error("file content mismatch");
-  log("PASS: ask level confirms each action; declined action did nothing");
+  if (written !== "ASK-YES-ALL") throw new Error("file content mismatch");
+  log("PASS: ask level confirms each action; declined action did nothing; allow-for-session silences later prompts");
 } finally {
   try { const t = (await windows()).find((l) => /\[notepad\.exe\]/i.test(l) && l.includes(fileName)); if (t) { await user("focus_window", { hwnd: hwndOf(t) }); await sleep(200); await user("key", { keys: "ctrl+w" }); await sleep(300); } } catch { /* ignore */ }
   if (before) { try { await user("focus_window", { hwnd: hwndOf(before) }); } catch { /* ignore */ } }

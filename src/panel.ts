@@ -50,24 +50,36 @@ function validatePolicy(raw: unknown): Policy {
 
 export interface PanelHandle { port: number; url: string; close: () => void }
 
-export const DEFAULT_PANEL_PORT = 17337;
+/** One panel per machine on a fixed port; DESKDOCK_PANEL_PORT overrides it for every client at once. */
+export const DEFAULT_PANEL_PORT = Number(process.env.DESKDOCK_PANEL_PORT) > 0 ? Number(process.env.DESKDOCK_PANEL_PORT) : 17337;
 
-/** Reads or creates %APPDATA%\deskdock\panel-token. */
-export function persistentToken(): string {
-  const file = path.join(policyDir(), "panel-token");
-  try { const t = readFileSync(file, "utf8").trim(); if (/^[0-9a-f]{32}$/.test(t)) return t; } catch { /* create below */ }
-  const t = randomBytes(16).toString("hex");
-  try { mkdirSync(policyDir(), { recursive: true }); writeFileSync(file, t, "utf8"); } catch { /* ignore */ }
-  return t;
+/** Is the thing listening on this port a DeskDock panel? (unauthenticated /api/ping, which reveals only that) */
+export function probePanel(port: number, timeoutMs = 1500): Promise<{ deskdock: boolean; version?: string } | null> {
+  return new Promise((resolve) => {
+    const req = http.get({ host: "127.0.0.1", port, path: "/api/ping", timeout: timeoutMs }, (res) => {
+      let body = ""; res.setEncoding("utf8"); res.on("data", (d) => { body += d; }); res.on("end", () => { try { const j = JSON.parse(body); resolve(j && j.deskdock === true ? j : { deskdock: false }); } catch { resolve({ deskdock: false }); } });
+    });
+    req.on("timeout", () => { req.destroy(); resolve(null); });
+    req.on("error", () => resolve(null));
+  });
+}
+
+/** The panel another DeskDock instance is serving, from panel.json, if that instance is still alive. */
+export function runningPanel(): { port: number; url: string; pid: number } | null {
+  try {
+    const info = JSON.parse(readFileSync(path.join(policyDir(), "panel.json"), "utf8")) as { port: number; url: string; pid: number };
+    try { process.kill(info.pid, 0); } catch { return null; }
+    return info;
+  } catch { return null; }
 }
 
 export function startPanel(opts: { policy: PolicyStore; port?: number; version: string; logsDir?: string; writeInfo?: boolean; macros?: MacroStore; token?: string }): Promise<PanelHandle> {
   const html = readFileSync(panelHtmlPath(), "utf8");
   const logs = opts.logsDir ?? defaultLogsDir();
   // Other local users and local programs can reach 127.0.0.1 too; a token in the URL (written to panel.json for the
-  // tray) keeps the API to whoever was handed the link. The token is persisted in the (user-private) data folder so the
-  // link in panel.json keeps working across restarts and every DeskDock instance agrees on it.
-  const token = opts.token ?? persistentToken();
+  // tray) keeps the API to whoever was handed the link. It is new for every run of the serving instance, so a leaked
+  // link dies with that instance.
+  const token = opts.token ?? randomBytes(16).toString("hex");
   const macros = opts.macros ?? new MacroStore();
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
@@ -78,6 +90,8 @@ export function startPanel(opts: { policy: PolicyStore; port?: number; version: 
     const json = (code: number, v: unknown) => send(code, JSON.stringify(v));
     try {
       if (req.method === "GET" && url.pathname === "/") return send(200, html, "text/html; charset=utf-8");
+      // the one call without a token: lets a second instance (or `deskdock panel`) tell "a DeskDock panel" from "some other program on this port"
+      if (req.method === "GET" && url.pathname === "/api/ping") return json(200, { deskdock: true, version: opts.version });
       if (url.pathname.startsWith("/api/") && req.headers["x-deskdock-token"] !== token) return json(401, { error: "missing or wrong token; open the panel through its full link (deskdock panel, or the tray icon)" });
       if (req.method === "GET" && url.pathname === "/api/status") {
         const today = new Date().toISOString().slice(0, 10);
@@ -117,7 +131,7 @@ export function startPanel(opts: { policy: PolicyStore; port?: number; version: 
   return new Promise((resolve, reject) => {
     // A fixed port means one panel per machine: the second DeskDock instance (another AI client) finds the port taken
     // and simply does not start a panel, instead of every instance writing its own panel.json.
-    server.once("error", (e: NodeJS.ErrnoException) => reject(e.code === "EADDRINUSE" ? Object.assign(new Error("panel port in use: another DeskDock instance already serves the control panel"), { code: "EADDRINUSE" }) : e));
+    server.once("error", (e: NodeJS.ErrnoException) => reject(e));
     server.listen(opts.port ?? DEFAULT_PANEL_PORT, "127.0.0.1", () => {
       const addr = server.address();
       const port = typeof addr === "object" && addr ? addr.port : (opts.port ?? 0);

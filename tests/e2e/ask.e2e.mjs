@@ -21,7 +21,7 @@ const user = (op, args = {}) => new Promise((res, rej) => { const i = id++; q.se
 async function answerDialog(button) {
   for (let i = 0; i < 60; i++) {
     await sleep(250);
-    const dlg = (await user("list_windows")).find((w) => /deskdock-helper\.exe/i.test(w.process) && w.title === "DeskDock");
+    const dlg = (await user("list_windows")).find((w) => /deskdock-native.exe/i.test(w.process) && w.title === "DeskDock");
     if (!dlg) continue;
     const snap = await user("uia_snapshot", { hwnd: dlg.hwnd, interactiveOnly: true });
     const text = snap.nodes.filter((n) => n.type === "text").map((n) => n.name).join(" ");

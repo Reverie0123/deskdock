@@ -78,3 +78,17 @@ test("unknown levels fail closed; title= matches the exact title only", () => {
   assert.equal(store.levelFor("notepad.exe", "运行说明.txt - Notepad"), "read", "title= is exact, so other titles containing the word are untouched (default here is read)");
   rmSync(dir, { recursive: true, force: true });
 });
+
+test("a policy file that is broken from the start fails closed (read), not open (full)", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "deskdock-policy-"));
+  const file = path.join(dir, "policy.json");
+  writeFileSync(file, "{ \"default\": \"full\", \"rules\": { \"bank.exe\": \"block\", } }"); // trailing comma
+  const store = new PolicyStore(file);
+  assert.equal(store.levelFor("random.exe", ""), "read");
+  assert.equal(store.levelFor("1password.exe", ""), "block", "built-in sensitive defaults still apply");
+  assert.match(store.problem, /could not be parsed/);
+  writeFileSync(file, JSON.stringify({ version: 1, default: "full", rules: {} }));
+  assert.equal(store.levelFor("random.exe", ""), "full", "recovers once the file is valid");
+  assert.equal(store.problem, undefined);
+  rmSync(dir, { recursive: true, force: true });
+});

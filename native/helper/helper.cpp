@@ -256,13 +256,31 @@ static void buttonFlags(const std::string& b, DWORD& down, DWORD& up) {
     else if (b == "middle") { down = MOUSEEVENTF_MIDDLEDOWN; up = MOUSEEVENTF_MIDDLEUP; }
     else { down = MOUSEEVENTF_LEFTDOWN; up = MOUSEEVENTF_LEFTUP; }
 }
+// The Node layer decides policy against a window, then calls us; the screen may have changed in between.
+// These checks run in the same step as the injection so the decision and the action apply to the same window.
+static HWND rootOf(HWND h) { HWND r = GetAncestor(h, GA_ROOT); return r ? r : h; }
+static void requireForeground(const json& a) {
+    if (!a.contains("expectHwnd") || a["expectHwnd"].is_null()) return;
+    HWND want = (HWND)(intptr_t)a["expectHwnd"].get<long long>();
+    HWND fg = GetForegroundWindow();
+    if (rootOf(fg) != rootOf(want)) throw std::runtime_error("refused: the foreground window changed before the input was sent (expected hwnd " + std::to_string((long long)(intptr_t)want) + ", now " + std::to_string((long long)(intptr_t)fg) + "); re-check with list_windows");
+}
+static void requireWindowAt(const json& a, const char* key, int x, int y) {
+    if (!a.contains(key) || a[key].is_null()) return;
+    HWND want = (HWND)(intptr_t)a[key].get<long long>();
+    POINT pt{ x, y }; HWND at = WindowFromPoint(pt);
+    if (!at || rootOf(at) != rootOf(want)) throw std::runtime_error("refused: a different window is now under (" + std::to_string(x) + "," + std::to_string(y) + ") than the one the policy was checked against; re-check with list_windows");
+}
 static json mouseMove(const json& a) {
+    requireWindowAt(a, "expectHwnd", a.at("x"), a.at("y"));
     std::vector<INPUT> v{ mouseAbs(a.at("x"), a.at("y"), MOUSEEVENTF_MOVE) }; sendInputs(v);
     POINT p; GetCursorPos(&p); return {{"x", p.x}, {"y", p.y}};
 }
 static json click(const json& a) {
     int x = a.at("x"), y = a.at("y"); int count = a.value("count", 1); DWORD down, up; buttonFlags(a.value("button", "left"), down, up);
+    requireWindowAt(a, "expectHwnd", x, y);
     std::vector<INPUT> v{ mouseAbs(x, y, MOUSEEVENTF_MOVE) }; sendInputs(v); Sleep(20);
+    requireWindowAt(a, "expectHwnd", x, y); // again after the move: a hover can open menus or raise other windows
     for (int i = 0; i < count; i++) {
         std::vector<INPUT> c{ mouseAbs(x, y, down), mouseAbs(x, y, up) }; sendInputs(c);
         if (i + 1 < count) Sleep(60);
@@ -271,6 +289,7 @@ static json click(const json& a) {
 }
 static json drag(const json& a) {
     int x1 = a.at("x1"), y1 = a.at("y1"), x2 = a.at("x2"), y2 = a.at("y2"); DWORD down, up; buttonFlags(a.value("button", "left"), down, up);
+    requireWindowAt(a, "expectHwnd", x1, y1); requireWindowAt(a, "expectHwnd2", x2, y2);
     std::vector<INPUT> v{ mouseAbs(x1, y1, MOUSEEVENTF_MOVE) }; sendInputs(v); Sleep(30);
     std::vector<INPUT> d{ mouseAbs(x1, y1, down) }; sendInputs(d); Sleep(60);
     const int steps = 12;
@@ -280,7 +299,9 @@ static json drag(const json& a) {
 }
 static json scroll(const json& a) {
     int x = a.at("x"), y = a.at("y"); int dy = a.value("dy", 0), dx = a.value("dx", 0);
+    requireWindowAt(a, "expectHwnd", x, y);
     std::vector<INPUT> v{ mouseAbs(x, y, MOUSEEVENTF_MOVE) }; sendInputs(v); Sleep(20);
+    requireWindowAt(a, "expectHwnd", x, y);
     std::vector<INPUT> s;
     if (dy) { INPUT in{}; in.type = INPUT_MOUSE; in.mi.dwFlags = MOUSEEVENTF_WHEEL; in.mi.mouseData = (DWORD)(-dy * WHEEL_DELTA); s.push_back(in); }
     if (dx) { INPUT in{}; in.type = INPUT_MOUSE; in.mi.dwFlags = MOUSEEVENTF_HWHEEL; in.mi.mouseData = (DWORD)(dx * WHEEL_DELTA); s.push_back(in); }
@@ -305,6 +326,7 @@ static json imeStatus(const json& a) { // test support: query or set the IME ope
 static json typeText(const json& a) {
     std::wstring w = u2w(a.at("text").get<std::string>());
     if (w.size() > 20000) w.resize(20000);
+    requireForeground(a);
     ImeGuard ime;
     std::vector<INPUT> v;
     for (wchar_t c : w) {
@@ -346,6 +368,7 @@ static json pressKeys(const json& a) {
     for (char c : combo) { if (c == '+' && !cur.empty()) { parts.push_back(cur); cur.clear(); } else cur += c; }
     if (!cur.empty()) parts.push_back(cur);
     if (parts.empty()) throw std::runtime_error("keys required");
+    requireForeground(a);
     std::vector<WORD> vks;
     bool hasShift = false; for (auto& p : parts) { std::string low = p; std::transform(low.begin(), low.end(), low.begin(), ::tolower); if (low == "shift") hasShift = true; }
     for (auto& p : parts) { if (!hasShift && keyNeedsShift(p)) { vks.push_back(VK_SHIFT); hasShift = true; } vks.push_back(vkFromName(p)); }
@@ -353,7 +376,7 @@ static json pressKeys(const json& a) {
         std::vector<INPUT> v;
         for (WORD vk : vks) { INPUT d{}; d.type = INPUT_KEYBOARD; d.ki.wVk = vk; d.ki.wScan = (WORD)MapVirtualKeyW(vk, MAPVK_VK_TO_VSC); v.push_back(d); }
         for (auto it = vks.rbegin(); it != vks.rend(); ++it) { INPUT u{}; u.type = INPUT_KEYBOARD; u.ki.wVk = *it; u.ki.wScan = (WORD)MapVirtualKeyW(*it, MAPVK_VK_TO_VSC); u.ki.dwFlags = KEYEVENTF_KEYUP; v.push_back(u); }
-        sendInputs(v); if (r + 1 < repeat) Sleep(40);
+        sendInputs(v); if (r + 1 < repeat) { Sleep(40); requireForeground(a); }
     }
     return {{"keys", combo}, {"repeat", repeat}};
 }
@@ -365,6 +388,7 @@ static json clipboardGet(const json&) {
     return {{"text", text}, {"hasText", has}};
 }
 static json clipboardSet(const json& a) {
+    requireForeground(a);
     std::wstring w = u2w(a.at("text").get<std::string>());
     if (!OpenClipboard(nullptr)) throw std::runtime_error("clipboard busy");
     EmptyClipboard();
@@ -404,17 +428,21 @@ struct RefEntry { std::vector<int> runtimeId; HWND hwnd; RECT rect; };
 static std::mutex g_refMutex; static std::map<int, RefEntry> g_refs; static int g_nextRef = 1;
 static std::atomic<int> g_gen{0}; // bumped per snapshot; a timed-out walk from an older snapshot must not register refs
 
+using Cancel = std::shared_ptr<std::atomic<bool>>;
 template <class F> static json withTimeout(F fn, int timeoutMs) {
-    auto task = std::make_shared<std::packaged_task<json()>>([fn]() {
+    auto cancel = std::make_shared<std::atomic<bool>>(false);
+    auto task = std::make_shared<std::packaged_task<json()>>([fn, cancel]() {
         CoInitializeEx(nullptr, COINIT_MULTITHREADED);
         json r;
-        try { r = fn(); } catch (...) { CoUninitialize(); throw; }
+        try { r = fn(cancel); } catch (...) { CoUninitialize(); throw; }
         CoUninitialize(); return r;
     });
     auto fut = task->get_future();
     std::thread([task]() { (*task)(); }).detach();
-    if (fut.wait_for(milliseconds(timeoutMs)) != std::future_status::ready)
+    if (fut.wait_for(milliseconds(timeoutMs)) != std::future_status::ready) {
+        cancel->store(true); // the detached thread checks this before any side effect
         throw std::runtime_error("UI Automation timed out after " + std::to_string(timeoutMs) + " ms (the app may not expose its UI tree; use screenshot instead)");
+    }
     return fut.get();
 }
 struct ComPtrUA {
@@ -507,7 +535,7 @@ static json uiaSnapshot(const json& a) {
     HWND h = hwndArg(a); if (!h) h = GetForegroundWindow();
     int maxDepth = a.value("maxDepth", 12), maxNodes = a.value("maxNodes", 400), timeoutMs = a.value("timeoutMs", 4000);
     bool interactiveOnly = a.value("interactiveOnly", false);
-    return withTimeout([=]() {
+    return withTimeout([=](Cancel cancel) {
         ComPtrUA ua;
         bool chromium = isChromiumWindow(h);
         if (chromium) knockChromium(h);
@@ -588,7 +616,7 @@ static json uiaFind(const json& a) {
     bool contains = a.value("nameContains", false);
     int timeoutMs = a.value("timeoutMs", 4000);
     if (name.empty() && type.empty() && aid.empty()) throw std::runtime_error("give name, type or automationId");
-    return withTimeout([=]() {
+    return withTimeout([=](Cancel cancel) {
         ComPtrUA ua;
         if (isChromiumWindow(h)) knockChromium(h);
         std::vector<IUIAutomationCondition*> conds;
@@ -626,16 +654,17 @@ static json uiaFind(const json& a) {
 }
 static json refNode(const json& a) {
     int ref = a.at("ref"); int timeoutMs = a.value("timeoutMs", 4000);
-    return withTimeout([=]() { ComPtrUA ua; RefEntry e; IUIAutomationElement* el = findByRef(ua.p, ref, e); json n = nodeOf(el, e.hwnd, 0); el->Release(); return json{{"window", windowJson(e.hwnd)}, {"node", n}}; }, timeoutMs);
+    return withTimeout([=](Cancel) { ComPtrUA ua; RefEntry e; IUIAutomationElement* el = findByRef(ua.p, ref, e); json n = nodeOf(el, e.hwnd, 0); el->Release(); return json{{"window", windowJson(e.hwnd)}, {"node", n}}; }, timeoutMs);
 }
 static json uiaAction(const json& a, const std::string& action) {
     int ref = a.at("ref"); int timeoutMs = a.value("timeoutMs", 4000);
     std::string text = a.value("text", "");
     bool physical = a.value("physical", false);
     std::string button = a.value("button", "left"); int count = a.value("count", 1);
-    return withTimeout([=]() {
+    return withTimeout([=](Cancel cancel) {
         ComPtrUA ua; RefEntry e; IUIAutomationElement* el = findByRef(ua.p, ref, e);
         RECT rc{}; el->get_CurrentBoundingRectangle(&rc); json out = {{"ref", ref}, {"rect", rectJson(rc)}};
+        if (cancel->load()) { el->Release(); throw std::runtime_error("cancelled: the call timed out before the action ran"); }
         if (action == "focus") { el->SetFocus(); out["action"] = "focus"; }
         else if (action == "setValue") {
             IUIAutomationValuePattern* vp = nullptr; el->GetCurrentPatternAs(UIA_ValuePatternId, __uuidof(IUIAutomationValuePattern), (void**)&vp);
@@ -651,7 +680,8 @@ static json uiaAction(const json& a, const std::string& action) {
                 POINT pt; BOOL got = FALSE; el->GetClickablePoint(&pt, &got);
                 if (!got) { pt.x = (rc.left + rc.right) / 2; pt.y = (rc.top + rc.bottom) / 2; }
                 if (rc.right <= rc.left) { el->Release(); throw std::runtime_error("element has no on-screen area"); }
-                json c = {{"x", pt.x}, {"y", pt.y}, {"button", button}, {"count", count}};
+                if (cancel->load()) { el->Release(); throw std::runtime_error("cancelled: the call timed out before the click"); }
+                json c = {{"x", pt.x}, {"y", pt.y}, {"button", button}, {"count", count}, {"expectHwnd", (long long)(intptr_t)rootOf(e.hwnd)}};
                 click(c); out["action"] = "click"; out["x"] = pt.x; out["y"] = pt.y;
             }
         }

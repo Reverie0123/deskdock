@@ -20,7 +20,7 @@ Either way, DeskDock is written into the MCP settings of every selected client. 
 
 - **Installs in one line, needs nothing else.** A single executable plus Node. No Python, no .NET runtime, no model download.
 - **Reads windows as text, not pixels.** Controls come back as `[ref] button "Save"` lines with exact screen rects. Clicking by ref survives window moves, DPI changes and multiple monitors. A screenshot is the fallback, not the default.
-- **You decide what it may touch.** Every app gets a level: block, read, click, ask (a yes/no dialog before each action) or full. Browsers are read-only by default, terminals and IDEs are click-only, password managers and payment apps are blocked. Denied actions are explained to the model so it asks you instead of guessing.
+- **You decide what it may touch.** Every app gets a level: block, read, click, ask (a yes/no dialog before each action) or full. Browsers are read-only by default, terminals and IDEs are click-only, password managers and payment apps are blocked. The target window is re-checked by the native engine in the same step as the input, so a focus change between the decision and the action is refused. Denied actions are explained to the model so it asks you instead of guessing.
 - **Chinese and English throughout.** Tool descriptions, errors and the setup command follow your system language, and the built-in Windows OCR reads Chinese UI text out of the box.
 
 ## How it compares
@@ -91,6 +91,8 @@ The policy lives at `%APPDATA%\deskdock\policy.json` (run `deskdock policy` to p
 Keys are lower-case process names, `title:` followed by a substring of the window title, or `title=` followed by the exact title (used for the Win+R Run box). When several rules match (a process rule and a `title:` rule), the strictest one wins; otherwise `default` applies. Windows whose process cannot be identified are capped at `read`. When a tool is denied, the model receives the reason and the file path, and is told to ask you to do that step yourself.
 
 Note that `read` still lets the model see what is on screen in that app, including a browser's address bar. Use `block` for anything it should not even look at.
+
+**Known limit:** a key chord sent to the foreground app can also trigger a *global* hotkey registered by another program (for example a password manager's quick-fill shortcut). No input-injection tool can tell those apart; prefer `ask` for keyboard-heavy sessions if that matters to you. If the policy file cannot be parsed, DeskDock falls back to read-only defaults and says so in every denial.
 
 ## Control panel and tray
 

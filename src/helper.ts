@@ -1,4 +1,4 @@
-// Talks to the C++ helper (resources/deskdock-helper.exe): one JSON request per line in, one JSON response per line out.
+// Talks to the C++ helper (resources/deskdock-native.exe --helper): one JSON request per line in, one JSON response per line out.
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 import { existsSync } from "node:fs";
@@ -50,7 +50,11 @@ export class Helper {
 
   private ensure(): ChildProcessWithoutNullStreams {
     if (this.proc && this.proc.exitCode === null) return this.proc;
-    const p = spawn(this.exe, this.args, { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+    // windowsHide suppresses a console window for console-subsystem children (the test fake runs under node.exe).
+    // The real engine is a GUI-subsystem exe with no console; with windowsHide its first window, the "ask" confirmation
+    // box, would inherit SW_HIDE and never be seen.
+    const isNativeGui = /deskdock-native\.exe$/i.test(this.exe);
+    const p = spawn(this.exe, this.args, { stdio: ["pipe", "pipe", "pipe"], windowsHide: !isNativeGui });
     const failAll = (why: string) => { if (this.proc !== p) return; for (const [, pend] of this.pending) { clearTimeout(pend.timer); pend.reject(new HelperError(why)); } this.pending.clear(); if (this.proc === p) this.proc = null; };
     p.on("error", (e) => failAll(`helper could not start: ${e.message}`));
     p.stdin.on("error", (e) => failAll(`helper pipe closed: ${e.message}`));

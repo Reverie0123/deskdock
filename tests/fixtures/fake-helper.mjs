@@ -1,4 +1,4 @@
-// A stand-in for deskdock-helper.exe: answers the ops the Node layer uses with canned data, never touches the system.
+// A stand-in for deskdock-native.exe: answers the ops the Node layer uses with canned data, never touches the system.
 // "hang" never answers; "fail" returns an error. Window 1 is a blocked banking app, window 2 is Notepad.
 import { createInterface } from "node:readline";
 const rect = (x, y, w, h) => ({ x, y, w, h });
@@ -32,6 +32,11 @@ rl.on("line", (line) => {
     case "uia_click": return reply({ action: "invoke", rect: rect(0, 0, 1, 1) });
     case "focus_window": return reply({ focused: true, window: WINDOWS.find((w) => w.hwnd === a.hwnd) ?? WINDOWS[1] });
     case "clipboard_get": return reply({ text: "clip", hasText: true });
+    case "clipboard_set": return (a.expectHwnd && a.expectHwnd !== 2) ? err("refused: the foreground window changed before the input was sent") : reply({ chars: String(a.text ?? "").length });
+    case "type": return (a.expectHwnd && a.expectHwnd !== 2) ? err("refused: the foreground window changed before the input was sent") : reply({ chars: String(a.text ?? "").length });
+    case "key": return (a.expectHwnd && a.expectHwnd !== 2) ? err("refused: the foreground window changed before the input was sent") : reply({ keys: a.keys, repeat: a.repeat ?? 1 });
+    case "click": { const under = a.x < 50 ? 1 : 2; return (a.expectHwnd && a.expectHwnd !== under) ? err("refused: a different window is now under the point") : reply({ x: a.x, y: a.y, button: a.button ?? "left", count: a.count ?? 1 }); }
+    case "drag": { const u1 = a.x1 < 50 ? 1 : 2, u2 = a.x2 < 50 ? 1 : 2; return ((a.expectHwnd && a.expectHwnd !== u1) || (a.expectHwnd2 && a.expectHwnd2 !== u2)) ? err("refused: a different window is now under the point") : reply({ from: { x: a.x1, y: a.y1 }, to: { x: a.x2, y: a.y2 } }); }
     case "confirm": return reply({ answer: /DENY-ME/.test(a.text) ? "no" : /TIMEOUT-ME/.test(a.text) ? "timeout" : "yes" });
     default: return reply({ pong: false, pid: process.pid, echo: a });
   }

@@ -51,6 +51,25 @@ test("coordinate click resolves the window under the point and applies its level
   assert.equal(onNotepad.err, false);
 });
 
+test("drag is checked at both ends; clipboard_set is checked against the foreground app; macro replay cannot read a blocked app", async () => {
+  const ok = await call("drag", { x1: 300, y1: 300, x2: 400, y2: 400 });
+  assert.equal(ok.err, false, ok.text);
+  const intoBank = await call("drag", { x1: 300, y1: 300, x2: 10, y2: 10 });
+  assert.equal(intoBank.err, true); assert.match(intoBank.text, /end in "bank\.exe"/);
+  // foreground (notepad) set to read: writing the clipboard is a click-level action and must be refused
+  writeFileSync(policyFile, JSON.stringify({ version: 1, default: "full", rules: { "bank.exe": "block", "notepad.exe": "read" } }));
+  await new Promise((r) => setTimeout(r, 30));
+  const clip = await call("clipboard_set", { text: "x" });
+  assert.equal(clip.err, true); assert.match(clip.text, /notepad\.exe/);
+  writeFileSync(policyFile, JSON.stringify({ version: 1, default: "full", rules: { "bank.exe": "block", "msedge.exe": "read" } }));
+  await new Promise((r) => setTimeout(r, 30));
+  const saved = await call("save_macro", { name: "peek_bank", description: "", steps: [{ tool: "click", args: { ref: 1 }, target: { process: "bank.exe", type: "document", name: "Text editor" } }] });
+  assert.equal(saved.err, false, saved.text);
+  const run = await call("macro_peek_bank", {});
+  assert.equal(run.err, true); assert.match(run.text, /bank\.exe/, "resolving a target must not read a blocked window");
+  await call("delete_macro", { name: "peek_bank" });
+});
+
 test("pause marker blocks every tool, including window-less ones, and is audited", async () => {
   writeFileSync(pausedPath(), "");
   try {

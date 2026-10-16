@@ -118,8 +118,9 @@ export function registerTools(server: McpServer, deps: Deps): void {
         if (win) {
           const d = decide(policy.levelFor(win.process, win.title), action, win.process, win.title);
           if (!d.allowed) {
-            audit.write({ ts: new Date().toISOString(), tool, args: redactArgs(tool, args), target: { process: win.process, title: win.title, hwnd: win.hwnd }, outcome: "denied", detail: d.reason, ms: Date.now() - t0 });
-            return fail(d.reason!);
+            const reason = d.reason! + (policy.problem ? ` (Note: ${policy.problem})` : "");
+            audit.write({ ts: new Date().toISOString(), tool, args: redactArgs(tool, args), target: { process: win.process, title: win.title, hwnd: win.hwnd }, outcome: "denied", detail: reason, ms: Date.now() - t0 });
+            return fail(reason);
           }
           if (d.confirm) {
             const zh = (process.env.DESKDOCK_LANG ?? Intl.DateTimeFormat().resolvedOptions().locale ?? "").toLowerCase().startsWith("zh");
@@ -265,12 +266,12 @@ export function registerTools(server: McpServer, deps: Deps): void {
     if (a.ref !== undefined) return byRef(a.ref);
     if (a.x === undefined || a.y === undefined) throw new Error("give either ref or both x and y");
     return targetAt(a.x, a.y);
-  }, async (a) => {
+  }, async (a, win) => {
     if (a.ref !== undefined) {
       const r = await helper.call<{ action: string; x?: number; y?: number; rect: { x: number; y: number; w: number; h: number } }>("uia_click", { ref: a.ref, button: a.button ?? "left", count: a.count ?? 1 }, 8000);
       return text(`${r.action === "invoke" ? "Invoked" : "Clicked"} [${a.ref}]${r.x !== undefined ? ` at (${r.x},${r.y})` : ""}.`);
     }
-    const r = await helper.call<{ x: number; y: number }>("click", { x: a.x, y: a.y, button: a.button ?? "left", count: a.count ?? 1 });
+    const r = await helper.call<{ x: number; y: number }>("click", { x: a.x, y: a.y, button: a.button ?? "left", count: a.count ?? 1, expectHwnd: win?.hwnd ?? null });
     return text(`Clicked (${r.x},${r.y}) ${a.button ?? "left"}${(a.count ?? 1) > 1 ? ` x${a.count}` : ""}.`);
   }));
 
@@ -280,7 +281,7 @@ export function registerTools(server: McpServer, deps: Deps): void {
     inputSchema: { text: z.string().min(1).max(20000) },
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
   }, guarded("type", "type", () => foreground(), async (a, win) => {
-    const r = await helper.call<{ chars: number; imeWasOpen?: boolean }>("type", { text: a.text });
+    const r = await helper.call<{ chars: number; imeWasOpen?: boolean }>("type", { text: a.text, expectHwnd: win?.hwnd ?? null });
     return text(`Typed ${r.chars} chars into ${win ? formatWindow(win) : "the foreground window"}.${r.imeWasOpen ? " (An IME was open and was held off while typing.)" : ""}`);
   }));
 
@@ -290,7 +291,7 @@ export function registerTools(server: McpServer, deps: Deps): void {
     inputSchema: { keys: z.string().min(1).max(60), repeat: z.number().int().min(1).max(50).optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
   }, guarded("key", "type", () => foreground(), async (a, win) => {
-    await helper.call("key", { keys: a.keys, repeat: a.repeat ?? 1 });
+    await helper.call("key", { keys: a.keys, repeat: a.repeat ?? 1, expectHwnd: win?.hwnd ?? null });
     return text(`Pressed ${a.keys}${(a.repeat ?? 1) > 1 ? ` x${a.repeat}` : ""} in ${win ? formatWindow(win) : "the foreground window"}.`);
   }));
 
@@ -299,8 +300,8 @@ export function registerTools(server: McpServer, deps: Deps): void {
     description: "Scroll the wheel at a screen point. dy>0 scrolls down, dy<0 up; dx for horizontal. One unit = one notch. 滚动。",
     inputSchema: { x: z.number().int(), y: z.number().int(), dy: z.number().int().min(-50).max(50).optional(), dx: z.number().int().min(-50).max(50).optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
-  }, guarded("scroll", "click", (a) => targetAt(a.x, a.y), async (a) => {
-    await helper.call("scroll", { x: a.x, y: a.y, dy: a.dy ?? 3, dx: a.dx ?? 0 });
+  }, guarded("scroll", "click", (a) => targetAt(a.x, a.y), async (a, win) => {
+    await helper.call("scroll", { x: a.x, y: a.y, dy: a.dy ?? 3, dx: a.dx ?? 0, expectHwnd: win?.hwnd ?? null });
     return text(`Scrolled at (${a.x},${a.y}) dy=${a.dy ?? 3} dx=${a.dx ?? 0}.`);
   }));
 
@@ -309,8 +310,11 @@ export function registerTools(server: McpServer, deps: Deps): void {
     description: "Press the mouse at (x1,y1), move to (x2,y2), release. 拖拽。",
     inputSchema: { x1: z.number().int(), y1: z.number().int(), x2: z.number().int(), y2: z.number().int(), button: z.enum(["left", "right", "middle"]).optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
-  }, guarded("drag", "click", (a) => targetAt(a.x1, a.y1), async (a) => {
-    await helper.call("drag", { x1: a.x1, y1: a.y1, x2: a.x2, y2: a.y2, button: a.button ?? "left" });
+  }, guarded("drag", "click", (a) => targetAt(a.x1, a.y1), async (a, win) => {
+    const end = await targetAt(a.x2, a.y2);
+    const d = decide(policy.levelFor(end.process, end.title), "click", end.process, end.title);
+    if (!d.allowed) throw new Denied(`Drag refused: it would end in "${end.process}" (${d.reason})`);
+    await helper.call("drag", { x1: a.x1, y1: a.y1, x2: a.x2, y2: a.y2, button: a.button ?? "left", expectHwnd: win?.hwnd ?? null, expectHwnd2: end.hwnd });
     return text(`Dragged (${a.x1},${a.y1}) -> (${a.x2},${a.y2}).`);
   }));
 
@@ -319,8 +323,8 @@ export function registerTools(server: McpServer, deps: Deps): void {
     description: "Move the cursor without clicking (hover, tooltips, menus). 移动鼠标。",
     inputSchema: { x: z.number().int(), y: z.number().int() },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
-  }, guarded("mouse_move", "click", (a) => targetAt(a.x, a.y), async (a) => {
-    const r = await helper.call<{ x: number; y: number }>("mouse_move", { x: a.x, y: a.y });
+  }, guarded("mouse_move", "click", (a) => targetAt(a.x, a.y), async (a, win) => {
+    const r = await helper.call<{ x: number; y: number }>("mouse_move", { x: a.x, y: a.y, expectHwnd: win?.hwnd ?? null });
     return text(`Cursor at (${r.x},${r.y}).`);
   }));
 
@@ -367,6 +371,8 @@ export function registerTools(server: McpServer, deps: Deps): void {
     const pool = cands.length ? cands : byProc; // title is a hint, not a requirement
     const win = pool.find((w) => w.focused) ?? pool.find((w) => !w.minimized) ?? pool[0];
     if (!win) throw new Error(`no window for ${t.process ?? ""} ${t.title ? JSON.stringify(t.title) : ""}; open the app first`);
+    const d = decide(policy.levelFor(win.process, win.title), "read", win.process, win.title);
+    if (!d.allowed) throw new Denied(d.reason!);
     const found = await helper.call<{ node: UiaNode }>("uia_find", { hwnd: win.hwnd, name: t.name ?? "", nameContains: t.nameContains ?? false, type: t.type ?? "", automationId: t.automationId ?? "" }, 8000);
     return found.node.ref;
   }
@@ -459,8 +465,10 @@ export function registerTools(server: McpServer, deps: Deps): void {
     description: "Put text on the clipboard (then press ctrl+v in the target app; good for long or formatted text). 写剪贴板。",
     inputSchema: { text: z.string().max(200000) },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
-  }, guarded("clipboard_set", "click", async () => undefined, async (a) => {
-    await helper.call("clipboard_set", { text: a.text });
+  }, guarded("clipboard_set", "click", async () => {
+    try { return await foreground(); } catch { throw new Denied("Clipboard write refused: the foreground window cannot be identified."); }
+  }, async (a, win) => {
+    await helper.call("clipboard_set", { text: a.text, expectHwnd: win?.hwnd ?? null });
     return text(`Clipboard set (${a.text.length} chars).`);
   }));
 }

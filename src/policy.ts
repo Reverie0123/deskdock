@@ -49,6 +49,9 @@ export function isPaused(): boolean { return existsSync(pausedPath()); }
 export class PolicyStore {
   private cached: Policy = DEFAULT_POLICY;
   private mtime = 0;
+  /** set when the file could not be parsed: the table in use is then a fail-closed one, and denials say so */
+  problem: string | undefined;
+  private warned = false;
   constructor(private readonly filePath: string = policyPath()) {}
   get file(): string { return this.filePath; }
 
@@ -74,11 +77,16 @@ export class PolicyStore {
         else if (raw.default !== undefined) { def = "read"; process.stderr.write(`[deskdock] policy: unknown default level "${String(raw.default)}"; using read\n`); }
         this.cached = { version: 1, default: def, rules };
         this.mtime = st.mtimeMs;
+        this.problem = undefined;
       }
-    } catch {
-      // a torn write (editor saving, panel PUT in flight) or a missing file: keep the last good table rather than
-      // falling back to something more permissive than what the user configured
-      if (this.mtime === 0) this.cached = DEFAULT_POLICY;
+    } catch (e) {
+      // Unreadable file. If we had a good table, keep it (an editor save or the panel may be mid-write).
+      // If we never had one, fail closed: the default rules with "read" as the fallback level, never "full".
+      if (this.mtime === 0) {
+        this.cached = { version: 1, default: "read", rules: DEFAULT_POLICY.rules };
+        this.problem = `policy file ${this.filePath} could not be parsed (${(e as Error).message.split("\n")[0]}); using read-only defaults until it is fixed`;
+        if (!this.warned) { process.stderr.write(`[deskdock] ${this.problem}\n`); this.warned = true; }
+      }
     }
     return this.cached;
   }

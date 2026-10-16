@@ -17,10 +17,8 @@ function appdata(): string { return process.env.APPDATA ?? path.join(home(), "Ap
 export function launchSpec(): { command: string; args: string[] } {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const entry = path.resolve(here, "index.js");
-  // Installed through npm (global or npx): the `deskdock` shim is on PATH, so clients can launch it by name
-  // and keep working across upgrades. A source checkout is launched with an absolute path instead.
-  const viaNpm = /[\\/]node_modules[\\/]deskdock[\\/]/.test(entry) || process.env.DESKDOCK_GLOBAL === "1";
-  if (viaNpm) return { command: "deskdock", args: [] };
+  // Always absolute paths: MCP clients spawn the command without a shell, so a `deskdock` / `deskdock.cmd` shim on PATH
+  // does not start on Windows, and PATH changes need a new session anyway. node.exe + dist/index.js works everywhere.
   return { command: process.execPath, args: [entry] };
 }
 

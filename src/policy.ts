@@ -54,7 +54,7 @@ export function isPaused(): boolean { return existsSync(pausedPath()); }
 
 export class PolicyStore {
   private cached: Policy = DEFAULT_POLICY;
-  private mtime = 0;
+  private stamp = ""; // mtime + size of the last table read: mtime alone misses a rewrite inside the same tick on coarse filesystems
   /** set when the file could not be parsed: the table in use is then a fail-closed one, and denials say so */
   problem: string | undefined;
   private warned = false;
@@ -71,25 +71,26 @@ export class PolicyStore {
   get(): Policy {
     try {
       const st = statSync(this.filePath);
-      if (st.mtimeMs !== this.mtime) {
+      const stamp = `${st.mtimeMs}:${st.size}`;
+      if (stamp !== this.stamp) {
         const raw = JSON.parse(readFileSync(this.filePath, "utf8")) as Partial<Policy>;
         const rules: Record<string, Level> = {};
         for (const [k, v] of Object.entries(raw.rules ?? {})) {
           if (LEVELS.includes(v as Level)) rules[k.trim().toLowerCase()] = v as Level;
           else { rules[k.trim().toLowerCase()] = "block"; process.stderr.write(`[deskdock] policy: unknown level "${String(v)}" for ${k}; treating as block\n`); }
         }
-        let def: Level = "full";
+        let def: Level = DEFAULT_POLICY.default; // a file without "default" behaves like the factory table
         if (LEVELS.includes(raw.default as Level)) def = raw.default as Level;
         else if (raw.default !== undefined) { def = "read"; process.stderr.write(`[deskdock] policy: unknown default level "${String(raw.default)}"; using read\n`); }
         this.cached = { version: 1, default: def, rules };
-        this.mtime = st.mtimeMs;
+        this.stamp = stamp;
         this.problem = undefined;
       }
     } catch (e) {
       // Unreadable file. If we had a good table, keep it (an editor save or the panel may be mid-write) but say so in
       // every denial; if we never had one, fail closed: the default rules with "read" as the fallback level, never "full".
       const why = (e as Error).message.split("\n")[0];
-      if (this.mtime === 0) {
+      if (this.stamp === "") {
         this.cached = { version: 1, default: "read", rules: DEFAULT_POLICY.rules };
         this.problem = `policy file ${this.filePath} could not be parsed (${why}); using read-only defaults until it is fixed`;
       } else {

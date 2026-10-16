@@ -33,7 +33,7 @@
     "test": "node --test --test-concurrency=1 tests/*.test.mjs",
     "test:e2e": "node tests/e2e/notepad.e2e.mjs",
     "tray": "start resources/deskdock-native.exe",
-    "prepublishOnly": "npm run build && npm test",
+    "prepublishOnly": "npm run build:native && npm run build && npm test",
     "pack:mcpb": "npx @anthropic-ai/mcpb pack . dist-mcpb/deskdock.mcpb",
     "build:native": "windres native/helper/helper.rc -O coff -o native/native_res.o && g++ -O2 -std=c++17 -static -s -Wall -Wno-misleading-indentation -mwindows -municode -o resources/deskdock-native.exe native/main.cpp native/native_res.o -lole32 -loleaut32 -luuid -lgdiplus -lgdi32 -luser32 -ldwmapi -loleacc -lshlwapi -limm32 -ladvapi32 -lshell32"
   },

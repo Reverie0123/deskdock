@@ -50,12 +50,24 @@ function validatePolicy(raw: unknown): Policy {
 
 export interface PanelHandle { port: number; url: string; close: () => void }
 
-export function startPanel(opts: { policy: PolicyStore; port?: number; version: string; logsDir?: string; writeInfo?: boolean; macros?: MacroStore }): Promise<PanelHandle> {
+export const DEFAULT_PANEL_PORT = 17337;
+
+/** Reads or creates %APPDATA%\deskdock\panel-token. */
+export function persistentToken(): string {
+  const file = path.join(policyDir(), "panel-token");
+  try { const t = readFileSync(file, "utf8").trim(); if (/^[0-9a-f]{32}$/.test(t)) return t; } catch { /* create below */ }
+  const t = randomBytes(16).toString("hex");
+  try { mkdirSync(policyDir(), { recursive: true }); writeFileSync(file, t, "utf8"); } catch { /* ignore */ }
+  return t;
+}
+
+export function startPanel(opts: { policy: PolicyStore; port?: number; version: string; logsDir?: string; writeInfo?: boolean; macros?: MacroStore; token?: string }): Promise<PanelHandle> {
   const html = readFileSync(panelHtmlPath(), "utf8");
   const logs = opts.logsDir ?? defaultLogsDir();
   // Other local users and local programs can reach 127.0.0.1 too; a token in the URL (written to panel.json for the
-  // tray) keeps the API to whoever was handed the link.
-  const token = randomBytes(16).toString("hex");
+  // tray) keeps the API to whoever was handed the link. The token is persisted in the (user-private) data folder so the
+  // link in panel.json keeps working across restarts and every DeskDock instance agrees on it.
+  const token = opts.token ?? persistentToken();
   const macros = opts.macros ?? new MacroStore();
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
@@ -103,8 +115,10 @@ export function startPanel(opts: { policy: PolicyStore; port?: number; version: 
     } catch (e) { json(500, { error: (e as Error).message }); }
   });
   return new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(opts.port ?? 0, "127.0.0.1", () => {
+    // A fixed port means one panel per machine: the second DeskDock instance (another AI client) finds the port taken
+    // and simply does not start a panel, instead of every instance writing its own panel.json.
+    server.once("error", (e: NodeJS.ErrnoException) => reject(e.code === "EADDRINUSE" ? Object.assign(new Error("panel port in use: another DeskDock instance already serves the control panel"), { code: "EADDRINUSE" }) : e));
+    server.listen(opts.port ?? DEFAULT_PANEL_PORT, "127.0.0.1", () => {
       const addr = server.address();
       const port = typeof addr === "object" && addr ? addr.port : (opts.port ?? 0);
       const url = `http://127.0.0.1:${port}/#${token}`;

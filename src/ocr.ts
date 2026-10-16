@@ -56,11 +56,17 @@ export class Ocr {
         let msg: { ready?: boolean; languages?: string[]; id?: number; ok?: boolean; error?: string } & Partial<OcrResult>;
         try { msg = JSON.parse(line); } catch { return; }
         if (msg.ready) { clearTimeout(timer); this.languages = msg.languages ?? []; resolve(this.languages); return; }
-        const pend = this.pending.get(msg.id ?? -1);
+        // id null: the worker could not parse the request; calls are serialized, so it is the oldest pending one
+        const key = msg.id ?? this.pending.keys().next().value;
+        const pend = key === undefined ? undefined : this.pending.get(key);
         if (!pend) return;
-        this.pending.delete(msg.id!);
+        this.pending.delete(key as number);
         clearTimeout(pend.timer);
-        msg.ok ? pend.resolve(msg as OcrResult) : pend.reject(new OcrError(msg.error ?? "OCR failed"));
+        if (msg.ok) { // PowerShell may unwrap single-element arrays into one object
+          const asArr = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : v == null ? [] : [v as T]);
+          const lines = asArr<OcrLine>((msg as { lines?: unknown }).lines).map((l) => ({ ...l, words: asArr<OcrWord>((l as { words?: unknown }).words) }));
+          pend.resolve({ ...(msg as OcrResult), lines });
+        } else pend.reject(new OcrError(msg.error ?? "OCR failed"));
       });
       p.on("exit", (code) => {
         clearTimeout(timer);

@@ -18,7 +18,7 @@ test("panel api: status, policy round-trip, logs", async () => {
     "{ torn line",
   ].join("\n") + "\n");
   const policy = new PolicyStore(policyFile); policy.ensureFile();
-  const panel = await startPanel({ policy, version: "test", logsDir: logs, writeInfo: false });
+  const panel = await startPanel({ policy, version: "test", logsDir: logs, writeInfo: false, port: 0, token: "0123456789abcdef0123456789abcdef" });
   const token = panel.url.split("#")[1];
   const base = panel.url.split("#")[0];
   const fetch0 = globalThis.fetch;

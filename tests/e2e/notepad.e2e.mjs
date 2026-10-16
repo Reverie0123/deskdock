@@ -10,12 +10,14 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const root = process.cwd();
+const home = path.join(process.env.LOCALAPPDATA, "Temp", "deskdock", "e2e-home"); mkdirSync(home, { recursive: true });
+writeFileSync(path.join(home, "policy.json"), JSON.stringify({ version: 1, default: "full", rules: { "notepad.exe": "full" } }));
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const hwndOf = (line) => Number(/hwnd=(\d+)/.exec(line)[1]);
 
 const client = new Client({ name: "deskdock-e2e", version: "0" });
-await client.connect(new StdioClientTransport({ command: process.execPath, args: [path.join(root, "dist", "index.js")], stderr: "pipe" }));
+await client.connect(new StdioClientTransport({ command: process.execPath, args: [path.join(root, "dist", "index.js")], stderr: "pipe", env: { ...process.env, DESKDOCK_HOME: home } }));
 const call = async (name, args = {}) => {
   const r = await client.callTool({ name, arguments: args });
   const t = r.content.find((c) => c.type === "text")?.text ?? "";

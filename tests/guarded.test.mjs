@@ -44,6 +44,34 @@ test("full-screen capture is refused while a blocked app is visible; a window ca
   assert.match(auditText(), /"tool":"screenshot".*"outcome":"denied"/);
 });
 
+test("clipboard_get is judged by the app that wrote the clipboard, not the one in front", async () => {
+  await helper.call("set_clip_owner", { ownerProcess: "bank.exe", ownerTitle: "My Bank", ownerHwnd: 1 });
+  const r = await call("clipboard_get");
+  assert.equal(r.err, true); assert.match(r.text, /bank\.exe/);
+  await helper.call("set_clip_owner", { ownerProcess: "notepad.exe", ownerTitle: "notes", ownerHwnd: 2 });
+  assert.equal((await call("clipboard_get")).err, false);
+});
+
+test("a blocked app with only a title-less window still blocks full-screen capture", async () => {
+  // the fake lists a title-less bank.exe popup only when asked for all windows; the normal list hides it
+  const normal = await call("list_windows");
+  assert.doesNotMatch(normal.text, /Popup/);
+  const shot = await call("screenshot");
+  assert.equal(shot.err, true); assert.match(shot.text, /bank\.exe/);
+});
+
+test("recorded typed text never lands in the macro file", async () => {
+  await call("read_window", { hwnd: 2 });
+  await call("click", { ref: 1 });
+  await call("type", { text: "SuperSecret-42" });
+  const saved = await call("save_macro", { name: "secret_test", description: "", fromLast: 2 });
+  assert.equal(saved.err, false, saved.text);
+  const file = readFileSync(path.join(home, "macros", "secret_test.json"), "utf8");
+  assert.doesNotMatch(file, /SuperSecret-42/);
+  assert.match(file, /\{\{text_1\}\}/);
+  await call("delete_macro", { name: "secret_test" });
+});
+
 test("coordinate click resolves the window under the point and applies its level", async () => {
   const onBank = await call("click", { x: 10, y: 10 });
   assert.equal(onBank.err, true); assert.match(onBank.text, /bank\.exe/);

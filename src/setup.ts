@@ -1,6 +1,6 @@
 // `deskdock setup`: write DeskDock into each installed MCP client's config. `--remove` undoes it, `--dry-run` only prints.
 import { existsSync, readFileSync, writeFileSync, copyFileSync, mkdirSync, readdirSync } from "node:fs";
-import { execSync } from "node:child_process";
+import { execSync, spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -79,7 +79,10 @@ function updateJsonClient(c: JsonFileClient, opts: SetupOptions): ClientResult {
   data[c.key] = servers;
   if (opts.dryRun) return { client: c.client, status: opts.remove ? "removed" : "written", detail: `(dry run) would ${opts.remove ? "remove from" : had ? "update" : "add to"} ${c.file}` };
   mkdirSync(path.dirname(c.file), { recursive: true });
-  if (existsSync(c.file)) copyFileSync(c.file, c.file + ".deskdock.bak");
+  if (existsSync(c.file)) {
+    if (!existsSync(c.file + ".deskdock.bak")) copyFileSync(c.file, c.file + ".deskdock.bak"); // the original, kept forever
+    copyFileSync(c.file, c.file + ".deskdock.prev");                                            // the state before this run
+  }
   writeFileSync(c.file, JSON.stringify(data, null, 2) + "\n", "utf8");
   return { client: c.client, status: opts.remove ? "removed" : "written", detail: `${had ? "updated" : "added"} in ${c.file}${existsSync(c.file + ".deskdock.bak") ? " (backup: .deskdock.bak)" : ""}` };
 }
@@ -95,12 +98,13 @@ function updateClaudeCode(opts: SetupOptions): ClientResult {
     ? ["mcp", "remove", "-s", "user", SERVER_NAME]
     : ["mcp", "add", "-s", "user", SERVER_NAME, "--", spec.command, ...spec.args];
   if (opts.dryRun) return { client: "Claude Code", status: opts.remove ? "removed" : "written", detail: `(dry run) would run: claude ${args.join(" ")}` };
-  const q = (a: string) => (/[\s"]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a);
-  try {
-    execSync(["claude", ...args.map(q)].join(" "), { stdio: "pipe", timeout: 30000 });
-    return { client: "Claude Code", status: opts.remove ? "removed" : "written", detail: `ran: claude ${args.join(" ")}` };
-  } catch (e) {
-    const msg = (e as { stderr?: Buffer }).stderr?.toString() ?? (e as Error).message;
+  // claude is a .cmd shim, so cmd.exe is unavoidable; every argument is quoted (quotes escaped) so that & ^ ( ) in a
+  // path cannot be interpreted, and the whole line is passed verbatim.
+  const q = (a: string) => `"${a.replace(/"/g, '\\"')}"`;
+  const r = spawnSync("cmd.exe", ["/d", "/s", "/c", `"${["claude", ...args].map(q).join(" ")}"`], { stdio: "pipe", timeout: 30000, windowsVerbatimArguments: true, encoding: "utf8" });
+  if (r.status === 0) return { client: "Claude Code", status: opts.remove ? "removed" : "written", detail: `ran: claude ${args.join(" ")}` };
+  {
+    const msg = (r.stderr || r.stdout || r.error?.message || `exit ${r.status}`).toString();
     if (!opts.remove && /already exists/i.test(msg)) return { client: "Claude Code", status: "skipped", detail: "already configured (run with --remove first to change it)" };
     return { client: "Claude Code", status: "error", detail: msg.trim() };
   }

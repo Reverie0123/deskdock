@@ -20,7 +20,7 @@ Either way, DeskDock is written into the MCP settings of every selected client. 
 
 - **Installs in one line, needs nothing else.** A single executable plus Node. No Python, no .NET runtime, no model download.
 - **Reads windows as text, not pixels.** Controls come back as `[ref] button "Save"` lines with exact screen rects. Clicking by ref survives window moves, DPI changes and multiple monitors. A screenshot is the fallback, not the default.
-- **You decide what it may touch.** Every app gets a level: block, read, click, ask (a yes/no dialog before each action) or full. Browsers are read-only by default, terminals and IDEs are click-only, password managers and payment apps are blocked. The target window is re-checked by the native engine in the same step as the input, so a focus change between the decision and the action is refused. Denied actions are explained to the model so it asks you instead of guessing.
+- **You decide what it may touch.** Every app gets a level: block, read, click, ask (a yes/no dialog before each action) or full. Apps without a rule **ask** before every action (Shift+Yes allows an app for the session); browsers are read-only, terminals and IDEs click-only, password managers, banks and payment apps blocked. The target window is re-checked by the native engine in the same step as the input, so a focus change between the decision and the action is refused. Denied actions are explained to the model so it asks you instead of guessing.
 - **Chinese and English throughout.** Tool descriptions, errors and the setup command follow your system language, and the built-in Windows OCR reads Chinese UI text out of the box.
 
 ## How it compares
@@ -68,7 +68,7 @@ The policy lives at `%APPDATA%\deskdock\policy.json` (run `deskdock policy` to p
 ```json
 {
   "version": 1,
-  "default": "full",
+  "default": "ask",
   "rules": {
     "msedge.exe": "read",
     "chrome.exe": "read",
@@ -80,6 +80,8 @@ The policy lives at `%APPDATA%\deskdock\policy.json` (run `deskdock policy` to p
 }
 ```
 
+The factory default for apps without a rule is `ask`.
+
 | Level | Screenshot, read_window, OCR | Click, scroll, drag, focus | Type, key, set_value |
 |---|---|---|---|
 | `block` | no | no | no |
@@ -88,7 +90,7 @@ The policy lives at `%APPDATA%\deskdock\policy.json` (run `deskdock policy` to p
 | `ask` | yes | after you click Yes in a dialog | after you click Yes in a dialog |
 | `full` | yes | yes | yes |
 
-Keys are lower-case process names, `title:` followed by a substring of the window title, or `title=` followed by the exact title (used for the Win+R Run box). When several rules match (a process rule and a `title:` rule), the strictest one wins; otherwise `default` applies. Windows whose process cannot be identified are capped at `read`. When a tool is denied, the model receives the reason and the file path, and is told to ask you to do that step yourself.
+Keys are lower-case process names, `title:` followed by a substring of the window title, `title=` followed by the exact title, or `class:<window class>@<process>` (used for the Win+R Run box: `class:#32770@explorer.exe`, which works in every UI language). When several rules match (a process rule and a `title:` rule), the strictest one wins; otherwise `default` applies. Windows whose process cannot be identified are capped at `read`. When a tool is denied, the model receives the reason and the file path, and is told to ask you to do that step yourself.
 
 Note that `read` still lets the model see what is on screen in that app, including a browser's address bar. Use `block` for anything it should not even look at.
 
@@ -96,7 +98,7 @@ Note that `read` still lets the model see what is on screen in that app, includi
 
 ## Control panel and tray
 
-`deskdock panel` opens a local page (127.0.0.1 only) where you edit the permission table, browse the audit log by day, filter by tool or outcome, and replay a session step by step on a timeline. The MCP server also starts the panel in the background whenever a client launches it.
+`deskdock panel` opens a local page (127.0.0.1 only, port 17337; one panel is shared by every DeskDock instance on the machine) where you edit the permission table, browse the audit log by day, filter by tool or outcome, and replay a session step by step on a timeline. The MCP server also starts the panel in the background whenever a client launches it.
 
 Double-clicking `resources/deskdock-native.exe` (the same file the server uses as its engine) puts an icon in the notification area: open the panel, open the log folder, exit, and **Pause DeskDock**. While paused, every tool call is refused with a message telling the model to ask you to resume. Pause state is a marker file in `%APPDATA%\deskdock`, so it works even when the panel is not open.
 
@@ -110,7 +112,7 @@ save_macro(name="wechat_send", description="Send a WeChat message", fromLast=4,
 → new tool macro_wechat_send(who, text)
 ```
 
-`fromLast=N` takes the last N successful actions of the session. Steps that clicked a `[ref]` are stored as a stable description (process, control name, type, automationId) and re-resolved at run time, so a macro keeps working after windows move or reopen. `{{param}}` placeholders become the tool's parameters. Every replayed step goes through the same permission table and audit log; macros cannot call other macros. Files live in `%APPDATA%\deskdock\macros`.
+`fromLast=N` takes the last N successful actions of the session. Text that was typed or pasted is never written to the macro file: each occurrence becomes a `text_N` parameter unless you map it with `replace`. Steps that clicked a `[ref]` are stored as a stable description (process, control name, type, automationId) and re-resolved at run time, so a macro keeps working after windows move or reopen. `{{param}}` placeholders become the tool's parameters. Every replayed step goes through the same permission table and audit log; macros cannot call other macros. Files live in `%APPDATA%\deskdock\macros`.
 
 ## Audit log
 

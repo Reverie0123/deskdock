@@ -28,6 +28,7 @@ while ($true) {
   $line = [Console]::In.ReadLine()
   if ($null -eq $line) { break }
   if ($line.Trim() -eq "") { continue }
+  $req = $null  # a parse failure below must not answer with the previous request id
   try {
     $req = $line | ConvertFrom-Json
     $reqPath = if ($req.pathB64) { [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($req.pathB64)) } else { $req.path }
@@ -50,9 +51,9 @@ while ($true) {
         if ($r.X + $r.Width -gt $x1) { $x1 = $r.X + $r.Width }; if ($r.Y + $r.Height -gt $y1) { $y1 = $r.Y + $r.Height }
         [void]$words.Add(@{ t = $w.Text; x = [int]$r.X; y = [int]$r.Y; w = [int]$r.Width; h = [int]$r.Height })
       }
-      [void]$lines.Add(@{ text = $l.Text; x = [int]$x0; y = [int]$y0; w = [int]($x1 - $x0); h = [int]($y1 - $y0); words = $words })
+      [void]$lines.Add(@{ text = $l.Text; x = [int]$x0; y = [int]$y0; w = [int]($x1 - $x0); h = [int]($y1 - $y0); words = @($words) })
     }
-    $out = @{ id = $req.id; ok = $true; ms = $sw.ElapsedMilliseconds; lang = $engine.RecognizerLanguage.LanguageTag; angle = $result.TextAngle; lines = $lines } | ConvertTo-Json -Compress -Depth 6
+    $out = @{ id = $req.id; ok = $true; ms = $sw.ElapsedMilliseconds; lang = $engine.RecognizerLanguage.LanguageTag; angle = $result.TextAngle; lines = @($lines) } | ConvertTo-Json -Compress -Depth 6
   } catch {
     $e = $_.Exception; $msgs = @()
     while ($e) { $msgs += $e.Message; if ($e -is [System.AggregateException] -and $e.InnerExceptions.Count -gt 0) { $e = $e.InnerExceptions[0] } else { $e = $e.InnerException } }

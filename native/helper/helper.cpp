@@ -118,21 +118,24 @@ static json windowJson(HWND h) {
         {"minimized", IsIconic(h) != 0}, {"focused", GetForegroundWindow() == h}, {"elevated", isElevated(pid) != 0}
     };
 }
-static json listWindows(const json&) {
-    json out = json::array();
+static json listWindows(const json& a) {
+    struct Ctx { json out; bool all; } ctx{ json::array(), a.value("all", false) };
     EnumWindows([](HWND h, LPARAM p) -> BOOL {
+        auto* c = (Ctx*)p;
         if (!IsWindowVisible(h) || isCloaked(h)) return TRUE;
         wchar_t cls[128] = L""; GetClassNameW(h, cls, 128);
         // Title-less system surfaces the model still needs: taskbar, tray overflow, context menus, popups.
         static const wchar_t* keep[] = { L"Shell_TrayWnd", L"Shell_SecondaryTrayWnd", L"NotifyIconOverflowWindow", L"TopLevelWindowForOverflowXamlIsland", L"#32768", L"Xaml_WindowedPopupClass", L"Windows.UI.Core.CoreWindow" };
         bool whitelisted = false; for (auto k : keep) if (wcscmp(cls, k) == 0) whitelisted = true;
-        if (GetWindowTextLengthW(h) == 0 && !whitelisted) return TRUE;
-        LONG ex = GetWindowLongW(h, GWL_EXSTYLE);
-        if ((ex & WS_EX_TOOLWINDOW) && !whitelisted) return TRUE;
-        ((json*)p)->push_back(windowJson(h));
+        if (!c->all) { // the normal list hides clutter; "all" is for policy checks, where a hidden title must not hide a blocked app
+            if (GetWindowTextLengthW(h) == 0 && !whitelisted) return TRUE;
+            LONG ex = GetWindowLongW(h, GWL_EXSTYLE);
+            if ((ex & WS_EX_TOOLWINDOW) && !whitelisted) return TRUE;
+        }
+        c->out.push_back(windowJson(h));
         return TRUE;
-    }, (LPARAM)&out);
-    return out;
+    }, (LPARAM)&ctx);
+    return ctx.out;
 }
 static json windowAt(const json& a) {
     POINT pt{ a.at("x").get<int>(), a.at("y").get<int>() };
@@ -189,6 +192,7 @@ static json screenshot(const json& a) {
     HWND h = hwndArg(a);
     double scale = a.value("scale", 1.0);
     if (scale <= 0 || scale > 1) scale = 1.0;
+    CLSID png; if (encoderClsid(L"image/png", &png) < 0) throw std::runtime_error("png encoder missing"); // before any GDI allocation
     RECT r;
     if (h) r = frameRect(h);
     else r = { GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN),
@@ -223,7 +227,6 @@ static json screenshot(const json& a) {
         img = new Gdiplus::Bitmap(ow, oh, PixelFormat24bppRGB);
         Gdiplus::Graphics g(img); g.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic); g.DrawImage(src, 0, 0, ow, oh);
     }
-    CLSID png; if (encoderClsid(L"image/png", &png) < 0) throw std::runtime_error("png encoder missing");
     IStream* stream = nullptr; CreateStreamOnHGlobal(nullptr, TRUE, &stream);
     img->Save(stream, &png, nullptr);
     HGLOBAL hg = nullptr; GetHGlobalFromStream(stream, &hg);
@@ -380,12 +383,20 @@ static json pressKeys(const json& a) {
     }
     return {{"keys", combo}, {"repeat", repeat}};
 }
+// The process that last wrote the clipboard: Windows keeps the owner window as long as that app is alive.
+static json clipboardOwnerJson() {
+    HWND owner = GetClipboardOwner(); DWORD pid = 0; std::string title;
+    if (owner) { GetWindowThreadProcessId(owner, &pid); wchar_t t[256] = L""; GetWindowTextW(GetAncestor(owner, GA_ROOT), t, 256); title = w2u(t); }
+    return {{"ownerProcess", pid ? processName(pid) : ""}, {"ownerTitle", title}, {"ownerHwnd", (long long)(intptr_t)(owner ? GetAncestor(owner, GA_ROOT) : nullptr)}};
+}
+static json clipboardOwner(const json&) { return clipboardOwnerJson(); }
 static json clipboardGet(const json&) {
     if (!OpenClipboard(nullptr)) throw std::runtime_error("clipboard busy");
     std::string text; bool has = false;
     if (HANDLE h = GetClipboardData(CF_UNICODETEXT)) { auto* p = (wchar_t*)GlobalLock(h); if (p) { text = w2u(p); has = true; GlobalUnlock(h); } }
     CloseClipboard();
-    return {{"text", text}, {"hasText", has}};
+    json out = clipboardOwnerJson(); out["text"] = text; out["hasText"] = has;
+    return out;
 }
 static json clipboardSet(const json& a) {
     requireForeground(a);
@@ -428,6 +439,7 @@ struct RefEntry { std::vector<int> runtimeId; HWND hwnd; RECT rect; };
 static std::mutex g_refMutex; static std::map<int, RefEntry> g_refs; static int g_nextRef = 1;
 static std::atomic<int> g_gen{0}; // bumped per snapshot; a timed-out walk from an older snapshot must not register refs
 
+static std::atomic<int> g_timeouts{0}; // consecutive UIA timeouts; each leaves a thread stuck inside COM, so the process is recycled after a few
 using Cancel = std::shared_ptr<std::atomic<bool>>;
 template <class F> static json withTimeout(F fn, int timeoutMs) {
     auto cancel = std::make_shared<std::atomic<bool>>(false);
@@ -441,8 +453,10 @@ template <class F> static json withTimeout(F fn, int timeoutMs) {
     std::thread([task]() { (*task)(); }).detach();
     if (fut.wait_for(milliseconds(timeoutMs)) != std::future_status::ready) {
         cancel->store(true); // the detached thread checks this before any side effect
+        g_timeouts++;
         throw std::runtime_error("UI Automation timed out after " + std::to_string(timeoutMs) + " ms (the app may not expose its UI tree; use screenshot instead)");
     }
+    g_timeouts = 0;
     return fut.get();
 }
 struct ComPtrUA {
@@ -696,9 +710,15 @@ static json confirm(const json& a) {
     int timeoutMs = a.value("timeoutMs", 30000);
     static MessageBoxTimeoutW_t mbt = (MessageBoxTimeoutW_t)GetProcAddress(GetModuleHandleW(L"user32.dll"), "MessageBoxTimeoutW");
     int r;
+    auto timedOut = std::make_shared<std::atomic<bool>>(false);
     if (mbt) r = mbt(nullptr, text.c_str(), title.c_str(), MB_YESNO | MB_ICONQUESTION | MB_TOPMOST | MB_SETFOREGROUND | MB_DEFBUTTON2, 0, (DWORD)timeoutMs);
-    else r = MessageBoxW(nullptr, text.c_str(), title.c_str(), MB_YESNO | MB_ICONQUESTION | MB_TOPMOST | MB_SETFOREGROUND | MB_DEFBUTTON2);
-    std::string answer = r == IDYES ? "yes" : r == IDNO ? "no" : "timeout";
+    else {
+        // no MessageBoxTimeoutW: a watchdog thread presses "No" on our own box when the time is up
+        std::thread([title, timeoutMs, timedOut]() { Sleep(timeoutMs); HWND box = FindWindowW(L"#32770", title.c_str()); if (box) { timedOut->store(true); PostMessageW(box, WM_COMMAND, IDNO, 0); } }).detach();
+        r = MessageBoxW(nullptr, text.c_str(), title.c_str(), MB_YESNO | MB_ICONQUESTION | MB_TOPMOST | MB_SETFOREGROUND | MB_DEFBUTTON2);
+    }
+    bool shiftHeld = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0; // Shift+Yes = allow everything in this app for the rest of the session
+    std::string answer = r == IDYES ? (shiftHeld ? "yes_all" : "yes") : r == IDNO ? (timedOut->load() ? "timeout" : "no") : "timeout";
     return {{"answer", answer}};
 }
 
@@ -722,6 +742,7 @@ static json dispatch(const std::string& op, const json& a) {
     if (op == "ime_status") return imeStatus(a);
     if (op == "key") return pressKeys(a);
     if (op == "clipboard_get") return clipboardGet(a);
+    if (op == "clipboard_owner") return clipboardOwner(a);
     if (op == "clipboard_set") return clipboardSet(a);
     if (op == "uia_snapshot") return uiaSnapshot(a);
     if (op == "ref_window") return refWindow(a);
@@ -748,6 +769,7 @@ static int helperMain() {
         } catch (const std::exception& e) { resp = {{"id", id}, {"ok", false}, {"error", e.what()}}; }
         std::string s = resp.dump(); s += '\n';
         fwrite(s.data(), 1, s.size(), stdout); fflush(stdout);
+        if (g_timeouts.load() >= 3) { fprintf(stderr, "deskdock helper: 3 consecutive UI Automation timeouts, recycling the process to drop stuck threads\n"); return 3; } // Node restarts us on the next call
     }
     Gdiplus::GdiplusShutdown(g_gdiToken); CoUninitialize();
     return 0;

@@ -7,13 +7,15 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const root = process.cwd();
+const home = path.join(process.env.LOCALAPPDATA, "Temp", "deskdock", "e2e-home"); mkdirSync(home, { recursive: true });
+writeFileSync(path.join(home, "policy.json"), JSON.stringify({ version: 1, default: "full", rules: { "notepad.exe": "full" } }));
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const hwndOf = (line) => Number(/hwnd=(\d+)/.exec(line)[1]);
 const refOf = (line) => Number(/\[(\d+)\]/.exec(line)[1]);
 
 const client = new Client({ name: "deskdock-e2e", version: "0" });
-await client.connect(new StdioClientTransport({ command: process.execPath, args: [path.join(root, "dist", "index.js")], stderr: "pipe" }));
+await client.connect(new StdioClientTransport({ command: process.execPath, args: [path.join(root, "dist", "index.js")], stderr: "pipe", env: { ...process.env, DESKDOCK_HOME: home } }));
 const call = async (name, args = {}) => { const r = await client.callTool({ name, arguments: args }); const t = r.content.find((c) => c.type === "text")?.text ?? ""; if (r.isError) throw new Error(`${name} -> ${t}`); return t; };
 const windows = async () => (await call("list_windows")).split("\n").filter(Boolean);
 const assertOurs = async (fileName) => { const fg = (await windows()).find((l) => l.includes("(focused)")) ?? ""; if (!/\[notepad\.exe\]/i.test(fg) || !fg.includes(fileName)) throw new Error("refusing input: foreground is " + fg.slice(0, 90)); };

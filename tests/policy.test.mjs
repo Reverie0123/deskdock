@@ -14,12 +14,15 @@ test("default levels by process name and title", () => {
   assert.equal(store.levelFor("msedge.exe", "anything"), "read");
   assert.equal(store.levelFor("MSEDGE.EXE", "anything"), "read", "case-insensitive process match");
   assert.equal(store.levelFor("WindowsTerminal.exe", ""), "click");
-  assert.equal(store.levelFor("notepad.exe", "Untitled"), "full");
+  assert.equal(store.levelFor("notepad.exe", "Untitled"), "ask", "apps without a rule ask before acting");
   assert.equal(store.levelFor("1password.exe", ""), "block");
   assert.equal(store.levelFor("someapp.exe", "我的网上银行 - 登录"), "block", "title rule");
   assert.equal(store.levelFor("notepad.exe", "policy.json - Notepad"), "read", "the model cannot edit its own permission table");
   assert.equal(store.levelFor("chrome.exe", "DeskDock"), "read", "nor use the control panel through a browser");
   assert.equal(store.levelFor("firefox.exe", "DeskDock"), "read");
+  assert.equal(store.levelFor("chrome.exe", "招商银行 - 个人银行 - Google Chrome"), "block", "banks inside a browser are blocked by title");
+  assert.equal(store.levelFor("explorer.exe", "Ausführen", "#32770"), "click", "the Run box is recognised by window class in any language");
+  assert.equal(store.levelFor("explorer.exe", "C:\\ - Properties", "#32770"), "click");
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -44,7 +47,7 @@ test("policy file is re-read when it changes", async () => {
   const file = path.join(dir, "policy.json");
   const store = new PolicyStore(file);
   store.ensureFile();
-  assert.equal(store.levelFor("notepad.exe", ""), "full");
+  assert.equal(store.levelFor("notepad.exe", ""), "ask", "factory default is ask");
   await new Promise((r) => setTimeout(r, 20));
   writeFileSync(file, JSON.stringify({ ...DEFAULT_POLICY, rules: { ...DEFAULT_POLICY.rules, "notepad.exe": "read" } }));
   assert.equal(store.levelFor("notepad.exe", ""), "read");
@@ -61,6 +64,9 @@ test("strictest matching rule wins; unknown process is capped at read; keys are 
   assert.equal(store.levelFor("chrome.exe", "My Online Banking - Chrome"), "block", "title rule must still apply inside a browser");
   assert.equal(store.levelFor("chrome.exe", "news"), "read", "upper-case key in the file still matches");
   assert.equal(store.levelFor("notepad.exe", "scratch.txt"), "click", "a looser title rule cannot widen a process rule");
+  writeFileSync(file, "{ broken after load");
+  assert.equal(store.levelFor("notepad.exe", ""), "click", "the last good table stays in use");
+  assert.match(store.problem, /new rules are NOT applied/);
   assert.equal(store.levelFor("", "Some system window"), "read", "no process name: never more than read");
   assert.equal(store.levelFor("", "online banking"), "block");
   assert.equal(store.levelFor("other.exe", "anything"), "full");

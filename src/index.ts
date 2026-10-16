@@ -108,7 +108,8 @@ async function main(): Promise<void> {
   process.stdin.on("close", shutdown);
   await server.connect(transport);
   let panelUrl = "";
-  try { const panel = await startPanel({ policy, version: VERSION, macros }); panelUrl = panel.url; } catch (e) { process.stderr.write(`DeskDock: control panel not started: ${(e as Error).message}\n`); }
+  try { const panel = await startPanel({ policy, version: VERSION, macros }); panelUrl = panel.url; }
+  catch (e) { process.stderr.write((e as NodeJS.ErrnoException).code === "EADDRINUSE" ? "DeskDock: control panel already served by another instance\n" : `DeskDock: control panel not started: ${(e as Error).message}\n`); }
   process.stderr.write(`DeskDock ${VERSION} ready (policy: ${policyPath()}${panelUrl ? `, panel: ${panelUrl}` : ""})\n`);
 }
 

@@ -11,13 +11,14 @@ export interface Policy {
   version: 1;
   /** Level used when no rule matches. */
   default: Level;
-  /** Keys are lower-case process names (e.g. "msedge.exe"), window-title substrings prefixed with "title:", or exact titles prefixed with "title=". */
+  /** Keys are lower-case process names (e.g. "msedge.exe"), window-title substrings prefixed with "title:", exact titles prefixed with "title=", or "class:<window class>@<process>". */
   rules: Record<string, Level>;
 }
 
 export const DEFAULT_POLICY: Policy = {
   version: 1,
-  default: "full",
+  // Apps without a rule get "ask": the user sees a yes/no box before each action and can switch an app to full (Shift+Yes, or the panel).
+  default: "ask",
   rules: {
     // browsers: look, don't touch (the model should use a browser tool for web pages)
     "msedge.exe": "read", "chrome.exe": "read", "firefox.exe": "read", "brave.exe": "read", "opera.exe": "read", "vivaldi.exe": "read", "arc.exe": "read",
@@ -28,8 +29,13 @@ export const DEFAULT_POLICY: Policy = {
     "1password.exe": "block", "bitwarden.exe": "block", "keepass.exe": "block", "keepassxc.exe": "block",
     "alipay.exe": "block", "alipaysecsvc.exe": "block", "wechatpay.exe": "block",
     "title:网上银行": "block", "title:online banking": "block", "title:密码管理": "block",
-    // the Win+R Run box lives in explorer.exe: let the model see it but not type a command into it (exact title)
-    "title=运行": "click", "title=run": "click",
+    // banks, brokers and payment sites in a browser (the browser itself is only "read", which still lets the model see the page)
+    "title:个人网银": "block", "title:企业网银": "block", "title:工商银行": "block", "title:建设银行": "block", "title:农业银行": "block", "title:中国银行": "block", "title:招商银行": "block", "title:交通银行": "block", "title:邮储银行": "block", "title:邮政储蓄": "block", "title:浦发银行": "block", "title:兴业银行": "block", "title:民生银行": "block", "title:中信银行": "block", "title:光大银行": "block", "title:平安银行": "block", "title:华夏银行": "block", "title:广发银行": "block", "title:支付宝": "block", "title:微信支付": "block", "title:财付通": "block", "title:云闪付": "block", "title:证券": "block", "title:同花顺": "block", "title:东方财富": "block", "title:富途": "block", "title:老虎证券": "block",
+    "title: bank": "block", "title:bank of": "block", "title:banking": "block", "title:paypal": "block", "title:coinbase": "block", "title:binance": "block", "title:brokerage": "block", "title:robinhood": "block", "title:wise.com": "block", "title:revolut": "block",
+    // the Win+R Run box is an explorer.exe dialog: let the model see it but not type a command into it (any UI language)
+    "class:#32770@explorer.exe": "click", "title=运行": "click", "title=run": "click",
+    // our own files: never let the model edit the permission table or read the panel token
+    "title:panel.json": "read", "title:panel-token": "block",
     // ourselves and the OS security surface
     "logonui.exe": "block", "consent.exe": "block", "credentialuihost.exe": "block",
     // the model must not edit its own permission table: any window showing the policy file or the control panel is read-only
@@ -80,27 +86,32 @@ export class PolicyStore {
         this.problem = undefined;
       }
     } catch (e) {
-      // Unreadable file. If we had a good table, keep it (an editor save or the panel may be mid-write).
-      // If we never had one, fail closed: the default rules with "read" as the fallback level, never "full".
+      // Unreadable file. If we had a good table, keep it (an editor save or the panel may be mid-write) but say so in
+      // every denial; if we never had one, fail closed: the default rules with "read" as the fallback level, never "full".
+      const why = (e as Error).message.split("\n")[0];
       if (this.mtime === 0) {
         this.cached = { version: 1, default: "read", rules: DEFAULT_POLICY.rules };
-        this.problem = `policy file ${this.filePath} could not be parsed (${(e as Error).message.split("\n")[0]}); using read-only defaults until it is fixed`;
-        if (!this.warned) { process.stderr.write(`[deskdock] ${this.problem}\n`); this.warned = true; }
+        this.problem = `policy file ${this.filePath} could not be parsed (${why}); using read-only defaults until it is fixed`;
+      } else {
+        this.problem = `policy file ${this.filePath} could not be parsed (${why}); the last valid table is still in use, new rules are NOT applied`;
       }
+      if (!this.warned) { process.stderr.write(`[deskdock] ${this.problem}\n`); this.warned = true; }
     }
     return this.cached;
   }
 
   /** The strictest of every matching rule (process name and any title: substring); default when nothing matches.
    *  A window whose process cannot be identified (protected/system process) is capped at read. */
-  levelFor(processName: string, title: string): Level {
+  levelFor(processName: string, title: string, windowClass = ""): Level {
     const p = this.get();
     const proc = processName.toLowerCase();
     const t = title.toLowerCase();
+    const cls = windowClass.toLowerCase();
     let level: Level | undefined = proc ? p.rules[proc] : undefined;
     for (const [k, v] of Object.entries(p.rules)) {
       const hit = (k.startsWith("title:") && k.length > 6 && t.includes(k.slice(6)))   // substring
-               || (k.startsWith("title=") && k.length > 6 && t === k.slice(6));         // exact title
+               || (k.startsWith("title=") && k.length > 6 && t === k.slice(6))          // exact title
+               || (k.startsWith("class:") && cls && k.slice(6) === `${cls}@${proc}`);  // window class@process
       if (hit) level = level === undefined ? v : strictest(level, v);
     }
     if (level === undefined) level = p.default;

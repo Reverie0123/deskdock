@@ -83,6 +83,23 @@ test("recorded typed text never lands in the macro file", async () => {
   await call("delete_macro", { name: "secret_test" });
 });
 
+test("explicit steps are redacted too, undeclared placeholders become parameters, and a missing parameter stops the macro", async () => {
+  const saved = await call("save_macro", { name: "explicit_test", description: "", steps: [
+    { tool: "click", args: { x: 300, y: 300 } },
+    { tool: "type", args: { text: "Hunter2-pass" } },
+    { tool: "type", args: { text: "{{greeting}} there" } },
+  ] });
+  assert.equal(saved.err, false, saved.text);
+  const file = readFileSync(path.join(home, "macros", "explicit_test.json"), "utf8");
+  assert.doesNotMatch(file, /Hunter2-pass/, "literal text passed explicitly must not be stored either");
+  assert.match(file, /\{\{text_1\}\}/);
+  const m = JSON.parse(file);
+  assert.deepEqual(m.params.map((p) => p.name).sort(), ["greeting", "text_1"], "every placeholder is a declared parameter");
+  const run = await call("macro_explicit_test", { text_1: "x" }); // greeting missing
+  assert.equal(run.err, true); assert.match(run.text, /greeting/, "refused by the schema (declared param) or by the runtime check");
+  await call("delete_macro", { name: "explicit_test" });
+});
+
 test("coordinate click resolves the window under the point and applies its level", async () => {
   const onBank = await call("click", { x: 10, y: 10 });
   assert.equal(onBank.err, true); assert.match(onBank.text, /bank\.exe/);

@@ -37,9 +37,19 @@ static std::string jsonString(const std::string& j, const char* key) {
 static DWORD jsonNumber(const std::string& j, const char* key) {
     std::string k = std::string("\"") + key + "\":"; size_t i = j.find(k); if (i == std::string::npos) return 0; return (DWORD)strtoul(j.c_str() + i + k.size(), nullptr, 10);
 }
+// Alive AND still a Node process: PIDs are recycled, so a stale panel.json could otherwise point at some unrelated program.
 static bool processAlive(DWORD pid) {
     if (!pid) return false; HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid); if (!h) return false;
-    DWORD code = 0; bool alive = GetExitCodeProcess(h, &code) && code == STILL_ACTIVE; CloseHandle(h); return alive;
+    DWORD code = 0; bool alive = GetExitCodeProcess(h, &code) && code == STILL_ACTIVE;
+    if (alive) {
+        wchar_t img[MAX_PATH * 2] = L""; DWORD n = MAX_PATH * 2;
+        if (QueryFullProcessImageNameW(h, 0, img, &n)) { std::wstring p(img); for (auto& c : p) c = (wchar_t)towlower(c); alive = p.find(L"\\node.exe") != std::wstring::npos || p.find(L"\\deskdock") != std::wstring::npos; }
+    }
+    CloseHandle(h); return alive;
+}
+static std::wstring utf8ToWide(const std::string& s) {
+    int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), nullptr, 0); std::wstring w(n, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), &w[0], n); return w;
 }
 static std::string panelUrl() {
     std::string j = readFile(g_dir + L"\\panel.json");
@@ -58,7 +68,7 @@ static void openPanel() {
     std::string url = panelUrl();
     if (url.empty()) { startPanel(); for (int i = 0; i < 20 && url.empty(); i++) { Sleep(250); url = panelUrl(); } }
     if (url.empty()) { MessageBoxW(nullptr, g_zh ? L"控制面板没有启动。请确认已安装 Node.js，或手动运行 deskdock panel。" : L"The control panel did not start. Make sure Node.js is installed, or run deskdock panel manually.", L"DeskDock", MB_ICONWARNING); return; }
-    std::wstring w(url.begin(), url.end());
+    std::wstring w = utf8ToWide(url);
     ShellExecuteW(nullptr, L"open", w.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 }
 static HICON g_icon = nullptr;

@@ -256,7 +256,8 @@ static json screenshot(const json& a) {
     if (g.img->Save(g.stream, &png, nullptr) != Gdiplus::Ok) throw std::runtime_error("png encoding failed");
     HGLOBAL hg = nullptr; GetHGlobalFromStream(g.stream, &hg);
     STATSTG st{}; g.stream->Stat(&st, STATFLAG_NONAME); size_t len = (size_t)st.cbSize.QuadPart;
-    auto* p = (unsigned char*)GlobalLock(hg);
+    auto* p = hg ? (unsigned char*)GlobalLock(hg) : nullptr;
+    if (!p) throw std::runtime_error("png buffer lock failed");
     std::string b64 = base64(p, len);
     GlobalUnlock(hg);
     return {{"png_base64", b64}, {"width", ow}, {"height", oh}, {"origin", {{"x", r.left}, {"y", r.top}}}, {"scale", scale}};
@@ -317,9 +318,17 @@ static json drag(const json& a) {
     int x1 = a.at("x1"), y1 = a.at("y1"), x2 = a.at("x2"), y2 = a.at("y2"); DWORD down, up; buttonFlags(a.value("button", "left"), down, up);
     requireWindowAt(a, "expectHwnd", x1, y1); requireWindowAt(a, "expectHwnd2", x2, y2);
     std::vector<INPUT> v{ mouseAbs(x1, y1, MOUSEEVENTF_MOVE) }; sendInputs(v); Sleep(30);
+    requireWindowAt(a, "expectHwnd", x1, y1); // the move itself may have changed what is under the cursor
     std::vector<INPUT> d{ mouseAbs(x1, y1, down) }; sendInputs(d); Sleep(60);
     const int steps = 12;
     for (int i = 1; i <= steps; i++) { std::vector<INPUT> m{ mouseAbs(x1 + (x2 - x1) * i / steps, y1 + (y2 - y1) * i / steps, MOUSEEVENTF_MOVE) }; sendInputs(m); Sleep(15); }
+    try { requireWindowAt(a, "expectHwnd2", x2, y2); }
+    catch (const std::exception& e) {
+        // the drop target changed while the button was down: go back and release where we started, so nothing is dropped elsewhere
+        std::vector<INPUT> back{ mouseAbs(x1, y1, MOUSEEVENTF_MOVE) }; sendInputs(back); Sleep(30);
+        std::vector<INPUT> cancel{ mouseAbs(x1, y1, up) }; sendInputs(cancel);
+        throw std::runtime_error(std::string("drag cancelled (released at the start point): ") + e.what());
+    }
     std::vector<INPUT> u{ mouseAbs(x2, y2, up) }; sendInputs(u);
     return {{"from", {{"x", x1}, {"y", y1}}}, {"to", {{"x", x2}, {"y", y2}}}};
 }
@@ -363,8 +372,24 @@ static json typeText(const json& a) {
         INPUT d{}; d.type = INPUT_KEYBOARD; d.ki.wScan = c; d.ki.dwFlags = KEYEVENTF_UNICODE; v.push_back(d);
         INPUT u = d; u.ki.dwFlags |= KEYEVENTF_KEYUP; v.push_back(u);
     }
-    // send in chunks so long texts don't overflow the input queue
-    for (size_t i = 0; i < v.size(); i += 64) { std::vector<INPUT> chunk(v.begin() + i, v.begin() + min(v.size(), i + 64)); sendInputs(chunk); Sleep(5); }
+    // Send in chunks so long texts don't overflow the input queue, and re-check the foreground before every chunk:
+    // if the user Alt-Tabs or a popup steals focus mid-way, the rest must not land in a window the policy never saw.
+    // SendInput is asynchronous: keystrokes are routed to whichever window is in front when the system processes
+    // them, so a focus change can still swallow the chunk in flight. Small chunks keep that exposure to a few characters,
+    // and the report says how many were confirmed in the target before the change was noticed.
+    const size_t CHUNK = 32; // INPUT records = 16 characters
+    size_t confirmedInputs = 0; // inputs sent while the target was still verified in front
+    for (size_t i = 0; i < v.size(); i += CHUNK) {
+        std::vector<INPUT> chunk(v.begin() + i, v.begin() + min(v.size(), i + CHUNK)); sendInputs(chunk); Sleep(8);
+        try { requireForeground(a); confirmedInputs = i + chunk.size(); }
+        catch (const std::exception&) {
+            long long typed = 0; for (size_t k = 0; k < confirmedInputs; k++) if (!(v[k].ki.dwFlags & KEYEVENTF_KEYUP)) typed++;
+            long long inFlight = 0; for (size_t k = confirmedInputs; k < i + chunk.size(); k++) if (!(v[k].ki.dwFlags & KEYEVENTF_KEYUP)) inFlight++;
+            // Even "confirmed" characters are not guaranteed: an app that loses focus may drop keystrokes still waiting in
+            // its queue (Windows 11 Notepad does). So the numbers are an upper bound and the model is told to read back.
+            throw std::runtime_error("stopped: the foreground window changed while typing. At most " + std::to_string(typed + inFlight) + " of " + std::to_string(w.size()) + " characters were sent before that (about " + std::to_string(typed) + " to the target, the rest in flight); the target may have received fewer, and up to " + std::to_string(inFlight) + " may have reached the window that took the focus. The remaining text was NOT typed. Use read_window to see what actually arrived before continuing.");
+        }
+    }
     return {{"chars", (long long)w.size()}, {"imeWasOpen", ime.wasOpen != 0}};
 }
 static WORD vkFromName(std::string k) {
@@ -430,8 +455,11 @@ static json clipboardSet(const json& a) {
     if (!OpenClipboard(nullptr)) throw std::runtime_error("clipboard busy");
     EmptyClipboard();
     HGLOBAL hg = GlobalAlloc(GMEM_MOVEABLE, (w.size() + 1) * sizeof(wchar_t));
-    memcpy(GlobalLock(hg), w.c_str(), (w.size() + 1) * sizeof(wchar_t)); GlobalUnlock(hg);
-    SetClipboardData(CF_UNICODETEXT, hg); CloseClipboard();
+    void* mem = hg ? GlobalLock(hg) : nullptr;
+    if (!mem) { if (hg) GlobalFree(hg); CloseClipboard(); throw std::runtime_error("clipboard allocation failed"); }
+    memcpy(mem, w.c_str(), (w.size() + 1) * sizeof(wchar_t)); GlobalUnlock(hg);
+    if (!SetClipboardData(CF_UNICODETEXT, hg)) { GlobalFree(hg); CloseClipboard(); throw std::runtime_error("SetClipboardData failed"); } // on success the system owns hg
+    CloseClipboard();
     g_ownClipSeq = GetClipboardSequenceNumber();
     return {{"chars", (long long)w.size()}};
 }
@@ -847,7 +875,7 @@ static int helperMain() {
     { typedef BOOL(WINAPI* F)(HANDLE); auto f = (F)GetProcAddress(GetModuleHandleW(L"user32.dll"), "SetProcessDpiAwarenessContext"); if (f) f((HANDLE)-4 /*PER_MONITOR_AWARE_V2*/); }
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     Gdiplus::GdiplusStartupInput gsi; Gdiplus::GdiplusStartup(&g_gdiToken, &gsi, nullptr);
-    std::string line;
+    std::string line; int exitCode = 0;
     while (std::getline(std::cin, line)) {
         if (line.empty()) continue;
         json resp; json id = nullptr;
@@ -858,8 +886,8 @@ static int helperMain() {
         } catch (const std::exception& e) { resp = {{"id", id}, {"ok", false}, {"error", e.what()}}; }
         std::string s = resp.dump(); s += '\n';
         fwrite(s.data(), 1, s.size(), stdout); fflush(stdout);
-        if (g_timeouts.load() >= 3) { fprintf(stderr, "deskdock helper: 3 consecutive UI Automation timeouts, recycling the process to drop stuck threads\n"); return 3; } // Node restarts us on the next call
+        if (g_timeouts.load() >= 3) { fprintf(stderr, "deskdock helper: 3 consecutive UI Automation timeouts, recycling the process to drop stuck threads\n"); exitCode = 3; break; } // Node restarts us on the next call
     }
     Gdiplus::GdiplusShutdown(g_gdiToken); CoUninitialize();
-    return 0;
+    return exitCode;
 }

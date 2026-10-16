@@ -71,8 +71,10 @@ export function registerTools(server: McpServer, deps: Deps): void {
   const handlers = new Map<string, (args: Record<string, unknown>) => Promise<Result>>();
   /** this session's successful calls, newest last, with resolved targets for ref-based steps (for save_macro fromLast) */
   const history: MacroStep[] = [];
-  /** processes the user allowed with Shift+Yes in an "ask" box; valid until this server exits */
-  const askAllowed = new Set<string>();
+  /** Apps the user allowed "from now on" in an ask box, keyed by process name as the dialog promises ("this app"), valid
+   *  until this server exits. The title that was on screen when it was granted is kept for the audit log. A title rule
+   *  that makes a window block still blocks: decide() runs before this set is consulted. */
+  const askAllowed = new Map<string, { title: string; at: string }>();
 
   async function targetAt(x: number, y: number): Promise<WindowInfo> { return helper.call<WindowInfo>("window_at", { x, y }); }
   async function foreground(): Promise<WindowInfo> { return helper.call<WindowInfo>("foreground_window"); }
@@ -111,6 +113,7 @@ export function registerTools(server: McpServer, deps: Deps): void {
     const fn = async (args: A): Promise<Result> => {
       const t0 = Date.now();
       let win: WindowInfo | undefined;
+      let grant: { title: string; at: string } | undefined; // set when an "ask" confirmation was skipped because the app was allowed earlier
       try {
         if (isPaused()) {
           const reason = "DeskDock is paused: the user paused it from the tray icon. Do not retry; tell the user and ask them to resume DeskDock (tray icon -> Pause) when they want you to continue.";
@@ -125,14 +128,15 @@ export function registerTools(server: McpServer, deps: Deps): void {
             audit.write({ ts: new Date().toISOString(), tool, args: redactArgs(tool, args), target: { process: win.process, title: win.title, hwnd: win.hwnd }, outcome: "denied", detail: reason, ms: Date.now() - t0 });
             return fail(reason);
           }
-          if (d.confirm && !askAllowed.has(win.process.toLowerCase())) {
+          grant = d.confirm ? askAllowed.get(win.process.toLowerCase()) : undefined;
+          if (d.confirm && !grant) {
             const zh = (process.env.DESKDOCK_LANG ?? Intl.DateTimeFormat().resolvedOptions().locale ?? "").toLowerCase().startsWith("zh");
             const what = describeAction(tool, args);
             // the engine shows three buttons (allow once / allow this app from now on / deny) and adds the countdown
             const msg = zh ? `AI 想在「${win.title.slice(0, 50)}」(${win.process}) 里执行：\n\n${what}`
                            : `The AI wants to act in "${win.title.slice(0, 50)}" (${win.process}):\n\n${what}`;
             const r = await helper.call<{ answer: string }>("confirm", { title: "DeskDock", text: msg, timeoutMs: 30000, lang: zh ? "zh" : "en" }, 40000);
-            if (r.answer === "yes_all") { askAllowed.add(win.process.toLowerCase()); audit.write({ ts: new Date().toISOString(), tool, args: {}, target: { process: win.process, title: win.title, hwnd: win.hwnd }, outcome: "ok", detail: "user allowed this app for the rest of the session", ms: 0 }); }
+            if (r.answer === "yes_all") { askAllowed.set(win.process.toLowerCase(), { title: win.title, at: new Date().toISOString() }); audit.write({ ts: new Date().toISOString(), tool, args: {}, target: { process: win.process, title: win.title, hwnd: win.hwnd }, outcome: "ok", detail: `user allowed ${win.process} for the rest of the session (granted while "${win.title.slice(0, 60)}" was on screen)`, ms: 0 }); }
             if (r.answer !== "yes" && r.answer !== "yes_all") {
               const reason = r.answer === "timeout" ? `The user did not answer the confirmation for ${tool} in "${win.title.slice(0, 40)}" within 30 s; treat it as declined and do not retry.` : `The user declined ${tool} in "${win.title.slice(0, 40)}". Do not retry; ask them what to do instead.`;
               audit.write({ ts: new Date().toISOString(), tool, args: redactArgs(tool, args), target: { process: win.process, title: win.title, hwnd: win.hwnd }, outcome: "denied", detail: reason, ms: Date.now() - t0 });
@@ -151,7 +155,7 @@ export function registerTools(server: McpServer, deps: Deps): void {
           } catch { /* ref gone: step is recorded without a target and cannot be replayed */ }
         }
         const r = await body(args, win);
-        audit.write({ ts: new Date().toISOString(), tool, args: redactArgs(tool, args), target: win && { process: win.process, title: win.title, hwnd: win.hwnd }, outcome: "ok", ms: Date.now() - t0 });
+        audit.write({ ts: new Date().toISOString(), tool, args: redactArgs(tool, args), target: win && { process: win.process, title: win.title, hwnd: win.hwnd }, outcome: "ok", detail: grant ? `confirmation skipped: app allowed for the session at ${grant.at}` : undefined, ms: Date.now() - t0 });
         if (!r.isError && !READ_ONLY_TOOLS.has(tool)) { history.push({ tool, args: { ...args }, target: macroTarget }); if (history.length > 500) history.shift(); }
         return r;
       } catch (e) {
@@ -391,6 +395,8 @@ export function registerTools(server: McpServer, deps: Deps): void {
 
   async function runMacro(m: Macro, params: Record<string, unknown>): Promise<Result> {
     if (!macros.get(m.name)) { registeredMacros.get(m.name)?.remove(); registeredMacros.delete(m.name); server.sendToolListChanged(); return fail(`macro_${m.name} was deleted (from the control panel); it is no longer available`); }
+    const missing = Array.from(new Set(Array.from(JSON.stringify(m.steps).matchAll(/\{\{(\w+)\}\}/g), (mm) => mm[1]))).filter((p) => params[p] === undefined || params[p] === "");
+    if (missing.length) return fail(`macro_${m.name}: missing parameter${missing.length > 1 ? "s" : ""} ${missing.join(", ")}; nothing was done`);
     audit.write({ ts: new Date().toISOString(), tool: `macro_${m.name}`, args: redactArgs("macro", params), outcome: "ok", detail: `start, ${m.steps.length} steps`, ms: 0 });
     const lines: string[] = [];
     for (const [i, step] of m.steps.entries()) {
@@ -455,17 +461,21 @@ export function registerTools(server: McpServer, deps: Deps): void {
         : Array.isArray(v) ? v.map(sub) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, sub(x)])) : v;
       steps = steps.map((st) => ({ ...st, args: sub(st.args) as Record<string, unknown>, target: st.target ? (sub(st.target) as MacroTarget) : undefined }));
     }
-    if (!a.steps) {
-      // recorded steps: text that was typed, pasted or set must not be written to disk in clear; it becomes a parameter
+    // Text that is typed, pasted or set is never written to disk in clear, whether the steps were recorded or passed
+    // explicitly: each literal becomes a text_N parameter (a {{placeholder}} the caller already used is kept).
+    {
       let n = 0;
-      steps = steps.map((st) => {
+      steps = steps.map((st, idx) => {
         const txt = (st.args as Record<string, unknown>).text;
         if (!["type", "set_value", "clipboard_set"].includes(st.tool) || typeof txt !== "string" || /\{\{\w+\}\}/.test(txt)) return st;
-        n++; const name = `text_${n}`;
-        params.push({ name, description: `text for step ${steps.indexOf(st) + 1} (${txt.length} characters when recorded; not stored)` });
+        do { n++; } while (params.some((p) => p.name === `text_${n}`));
+        const name = `text_${n}`;
+        params.push({ name, description: `text for step ${idx + 1} (${txt.length} characters when saved; not stored)` });
         return { ...st, args: { ...st.args, text: `{{${name}}}` } };
       });
     }
+    // every {{placeholder}} used in a step is a parameter, declared or not: otherwise it would be typed literally
+    for (const ph of new Set(Array.from(JSON.stringify(steps).matchAll(/\{\{(\w+)\}\}/g), (mm) => mm[1]))) if (!params.some((p) => p.name === ph)) params.push({ name: ph });
     const m: Macro = { name: a.name, description: a.description, params, steps, created: new Date().toISOString() };
     try { validateMacro(m); macros.save(m); registerMacro(m); server.sendToolListChanged(); }
     catch (e) { return fail(`save_macro: ${(e as Error).message}`); }

@@ -440,6 +440,8 @@ static std::mutex g_refMutex; static std::map<int, RefEntry> g_refs; static int 
 static std::atomic<int> g_gen{0}; // bumped per snapshot; a timed-out walk from an older snapshot must not register refs
 
 static std::atomic<int> g_timeouts{0}; // consecutive UIA timeouts; each leaves a thread stuck inside COM, so the process is recycled after a few
+// older mingw-w64 headers spell the subtree scope TreeScope_SubTree, newer ones TreeScope_Subtree: build it from the two constants both have
+static const TreeScope kTreeScopeSubtree = (TreeScope)(TreeScope_Element | TreeScope_Descendants);
 using Cancel = std::shared_ptr<std::atomic<bool>>;
 template <class F> static json withTimeout(F fn, int timeoutMs) {
     auto cancel = std::make_shared<std::atomic<bool>>(false);
@@ -592,7 +594,7 @@ static IUIAutomationElement* findByRef(IUIAutomation* ua, int ref, RefEntry& ent
     for (LONG i = 0; i < (LONG)entry.runtimeId.size(); i++) SafeArrayPutElement(sa, &i, &entry.runtimeId[i]);
     VARIANT v; v.vt = VT_I4 | VT_ARRAY; v.parray = sa;
     IUIAutomationCondition* cond = nullptr; ua->CreatePropertyCondition(UIA_RuntimeIdPropertyId, v, &cond);
-    IUIAutomationElement* el = nullptr; root->FindFirst(TreeScope_Subtree, cond, &el);
+    IUIAutomationElement* el = nullptr; root->FindFirst(kTreeScopeSubtree, cond, &el);
     cond->Release(); SafeArrayDestroy(sa); root->Release();
     if (!el) throw std::runtime_error("element disappeared (take a new snapshot)");
     return el;
@@ -645,7 +647,7 @@ static json uiaFind(const json& a) {
         json best = nullptr, fallback = nullptr; int checked = 0;
         for (HWND root_hwnd : roots) {
             IUIAutomationElement* root = nullptr; if (FAILED(ua.p->ElementFromHandle(root_hwnd, &root)) || !root) continue;
-            IUIAutomationElementArray* arr = nullptr; root->FindAll(TreeScope_Subtree, cond, &arr);
+            IUIAutomationElementArray* arr = nullptr; root->FindAll(kTreeScopeSubtree, cond, &arr);
             if (arr) {
                 int n = 0; arr->get_Length(&n);
                 for (int i = 0; i < n && best.is_null(); i++) {

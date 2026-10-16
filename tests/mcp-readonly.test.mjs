@@ -61,7 +61,9 @@ test("mcp server read-only tools", async (t) => {
       if (wimg) writeFileSync(path.join(outDir, "window.png"), Buffer.from(wimg.data, "base64"));
     }
 
+    // the real engine: an empty clipboard or one written by a window reads fine; one whose writer has exited is refused
     const clip = await client.callTool({ name: "clipboard_get", arguments: {} });
-    assert.equal(clip.isError, undefined);
+    const clipText = clip.content.find((c) => c.type === "text")?.text ?? "";
+    if (clip.isError) assert.match(clipText, /no longer running/, clipText); else assert.ok(clipText.length > 0);
   } finally { await client.close(); }
 });

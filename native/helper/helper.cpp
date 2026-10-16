@@ -412,7 +412,8 @@ static json clipboardOwnerJson() {
     HWND owner = GetClipboardOwner(); DWORD pid = 0; std::string title;
     if (owner) { GetWindowThreadProcessId(owner, &pid); wchar_t t[256] = L""; GetWindowTextW(GetAncestor(owner, GA_ROOT), t, 256); title = w2u(t); }
     bool ownSet = g_ownClipSeq.load() != 0 && GetClipboardSequenceNumber() == g_ownClipSeq.load();
-    return {{"ownerProcess", pid ? processName(pid) : ""}, {"ownerTitle", title}, {"ownerHwnd", (long long)(intptr_t)(owner ? GetAncestor(owner, GA_ROOT) : nullptr)}, {"ownSet", ownSet}};
+    bool empty = !IsClipboardFormatAvailable(CF_UNICODETEXT) && !IsClipboardFormatAvailable(CF_TEXT); // nothing to leak
+    return {{"ownerProcess", pid ? processName(pid) : ""}, {"ownerTitle", title}, {"ownerHwnd", (long long)(intptr_t)(owner ? GetAncestor(owner, GA_ROOT) : nullptr)}, {"ownSet", ownSet}, {"empty", empty}};
 }
 static json clipboardOwner(const json&) { return clipboardOwnerJson(); }
 static json clipboardGet(const json&) {

@@ -54,6 +54,9 @@ test("clipboard_get is judged by the app that wrote the clipboard, not the one i
   await helper.call("set_clip_owner", { ownerProcess: "", ownerTitle: "", ownerHwnd: 0 });
   const gone = await call("clipboard_get");
   assert.equal(gone.err, true); assert.match(gone.text, /no longer running/);
+  // ...or when there is no text at all (a fresh session): nothing to protect
+  await helper.call("set_clip_owner", { ownerProcess: "", ownerTitle: "", ownerHwnd: 0, empty: true });
+  assert.equal((await call("clipboard_get")).err, false);
   // ...unless DeskDock itself wrote it
   await helper.call("set_clip_owner", { ownerProcess: "", ownerTitle: "", ownerHwnd: 0, ownSet: true });
   assert.equal((await call("clipboard_get")).err, false);

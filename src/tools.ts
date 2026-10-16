@@ -361,7 +361,8 @@ export function registerTools(server: McpServer, deps: Deps): void {
   }, guarded("clipboard_get", "read", async () => {
     // The data belongs to whoever put it there (Windows remembers the owner window), not to the app in front:
     // a password copied from a blocked manager stays blocked after switching to Notepad.
-    const o = await helper.call<{ ownerProcess: string; ownerTitle: string; ownerHwnd: number; ownSet?: boolean }>("clipboard_owner");
+    const o = await helper.call<{ ownerProcess: string; ownerTitle: string; ownerHwnd: number; ownSet?: boolean; empty?: boolean }>("clipboard_owner");
+    if (o.empty) return undefined; // no text at all: nothing to protect, the tool just reports an empty clipboard
     if (o.ownerProcess) return { hwnd: o.ownerHwnd, title: o.ownerTitle, class: "", pid: 0, process: o.ownerProcess, rect: { x: 0, y: 0, w: 0, h: 0 }, minimized: false, focused: false };
     // No owner: the app that copied has exited (so its level cannot be checked), or a tool wrote the clipboard without a
     // window. Only our own clipboard_set is known to be harmless; everything else is refused rather than guessed.

@@ -8,3 +8,7 @@ dist-mcpb/
 native/**/*_res.o
 build/
 dist-installer/
+# local working notes, not part of the published project
+进度记录.md
+待办-需要你动手.md
+docs/launch.md

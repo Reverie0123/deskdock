@@ -445,12 +445,13 @@ export function registerTools(server: McpServer, deps: Deps): void {
 
   server.registerTool("save_macro", {
     title: "Save macro",
-    description: "Save a sequence of tool calls as a reusable macro, exposed immediately as the tool macro_<name>. Either pass steps explicitly, or fromLast=N to take the last N successful actions of this session (ref clicks are stored as stable control descriptions; typed text is never stored, it becomes a text_N parameter unless you map it with replace). Use {{param}} placeholders in args and declare them in params. 把一串操作存成宏。",
+    description: "Save a sequence of tool calls as a reusable macro, exposed immediately as the tool macro_<name>. Either pass steps explicitly, or fromLast=N to take the last N successful actions of this session (ref clicks are stored as stable control descriptions; typed text is never stored, it becomes a text_N parameter unless you map it with replace or list the step in keepText because it is harmless, like a program name). Use {{param}} placeholders in args and declare them in params. 把一串操作存成宏。",
     inputSchema: {
       name: z.string().regex(MACRO_NAME).describe("lower_snake_case, e.g. wechat_send"),
       description: z.string().max(300),
       fromLast: z.number().int().min(1).max(200).optional().describe("Take the last N successful non-read actions of this session"),
-      steps: z.array(z.object({ tool: z.string(), args: z.record(z.string(), z.unknown()).default({}), target: z.object({ process: z.string().optional(), title: z.string().optional(), name: z.string().optional(), nameContains: z.boolean().optional(), type: z.string().optional(), automationId: z.string().optional() }).optional(), waitMs: z.number().int().min(0).max(30000).optional() })).optional(),
+      steps: z.array(z.object({ tool: z.string(), args: z.record(z.string(), z.unknown()).default({}), target: z.object({ process: z.string().optional(), title: z.string().optional(), name: z.string().optional(), nameContains: z.boolean().optional(), type: z.string().optional(), automationId: z.string().optional() }).optional(), waitMs: z.number().int().min(0).max(30000).optional(), keepText: z.boolean().optional().describe("Store this step's text literally instead of turning it into a text_N parameter (only for text that is not sensitive, e.g. a program name)") })).optional(),
+      keepText: z.array(z.number().int().min(1)).optional().describe("1-based step numbers whose typed text is not sensitive and may be stored literally (e.g. \"notepad\" typed into the Run box); every other type/set_value/clipboard_set text becomes a text_N parameter"),
       params: z.array(z.object({ name: z.string(), description: z.string().optional() })).optional(),
       replace: z.record(z.string(), z.string()).optional().describe("Literal text -> {{param}}: replaces that text in recorded args so the macro takes it as a parameter"),
     },
@@ -473,6 +474,9 @@ export function registerTools(server: McpServer, deps: Deps): void {
       let n = 0;
       steps = steps.map((st, idx) => {
         const txt = (st.args as Record<string, unknown>).text;
+        const { keepText, ...plain } = st as MacroStep & { keepText?: boolean };
+        if (keepText || a.keepText?.includes(idx + 1)) return plain; // caller vouches that this text is not sensitive
+        st = plain;
         if (!["type", "set_value", "clipboard_set"].includes(st.tool) || typeof txt !== "string" || /\{\{\w+\}\}/.test(txt)) return st;
         do { n++; } while (params.some((p) => p.name === `text_${n}`));
         const name = `text_${n}`;

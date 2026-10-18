@@ -112,7 +112,7 @@ save_macro(name="wechat_send", description="Send a WeChat message", fromLast=4,
 → new tool macro_wechat_send(who, text)
 ```
 
-`fromLast=N` takes the last N successful actions of the session. Text that was typed or pasted is never written to the macro file: each occurrence becomes a `text_N` parameter unless you map it with `replace`. Steps that clicked a `[ref]` are stored as a stable description (process, control name, type, automationId) and re-resolved at run time, so a macro keeps working after windows move or reopen. `{{param}}` placeholders become the tool's parameters. Every replayed step goes through the same permission table and audit log; macros cannot call other macros. Files live in `%APPDATA%\deskdock\macros`.
+`fromLast=N` takes the last N successful actions of the session. Text that was typed or pasted is never written to the macro file: each occurrence becomes a `text_N` parameter unless you map it with `replace`, or list the step in `keepText` because the text is harmless (a program name typed into the Run box, for example). Steps that clicked a `[ref]` are stored as a stable description (process, control name, type, automationId) and re-resolved at run time, so a macro keeps working after windows move or reopen. `{{param}}` placeholders become the tool's parameters. Every replayed step goes through the same permission table and audit log; macros cannot call other macros. Files live in `%APPDATA%\deskdock\macros`.
 
 ## Audit log
 

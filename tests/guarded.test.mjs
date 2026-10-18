@@ -95,6 +95,18 @@ test("explicit steps are redacted too, undeclared placeholders become parameters
   assert.match(file, /\{\{text_1\}\}/);
   const m = JSON.parse(file);
   assert.deepEqual(m.params.map((p) => p.name).sort(), ["greeting", "text_1"], "every placeholder is a declared parameter");
+  // keepText: the caller vouches that a step's text is harmless (a program name), so it stays literal
+  const kept = await call("save_macro", { name: "keep_test", description: "", keepText: [2], steps: [
+    { tool: "key", args: { keys: "win+r" } },
+    { tool: "type", args: { text: "notepad" } },
+    { tool: "type", args: { text: "Hunter2-pass" }, keepText: false },
+  ] });
+  assert.equal(kept.err, false, kept.text);
+  const keptFile = JSON.parse(readFileSync(path.join(home, "macros", "keep_test.json"), "utf8"));
+  assert.equal(keptFile.steps[1].args.text, "notepad", "listed step keeps its text");
+  assert.equal(keptFile.steps[2].args.text, "{{text_1}}", "other text is still a parameter");
+  assert.equal("keepText" in keptFile.steps[1], false, "the flag itself is not stored");
+  await call("delete_macro", { name: "keep_test" });
   const run = await call("macro_explicit_test", { text_1: "x" }); // greeting missing
   assert.equal(run.err, true); assert.match(run.text, /greeting/, "refused by the schema (declared param) or by the runtime check");
   await call("delete_macro", { name: "explicit_test" });

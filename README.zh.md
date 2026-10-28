@@ -122,6 +122,14 @@ save_macro(name="wechat_send", description="发一条微信", fromLast=4,
 
 大多数原生程序、WinUI、Office 和 Chromium 内核的程序都能读到完整的控件树。Electron 程序要等到有辅助技术出现才会建树：DeskDock 每次读取都会发出 Chromium 识别的那几个信号，但对这类程序第一次 `read_window` 仍可能只读到标题栏三个按钮，隔几秒重试就有完整的树了。游戏和自绘界面根本没有控件树。这些情况下 `read_screen_text` 会把截图交给 Windows 10/11 自带的 OCR 引擎，返回每行文字和坐标，模型照样能按文字点击。想让英文界面识别得更准，可以在「设置 → 时间和语言 → 语言 → 添加语言 → 英语 → 可选功能 → 光学字符识别」装上英文识别包。
 
+## 教模型怎么用
+
+模型从三层材料里学会用 DeskDock，前两层是自动的：
+
+1. **工具说明。** 每个工具都写明了它做什么、下一步该调什么、什么时候该退到别的办法。任何 MCP 客户端都会把这些给模型看。
+2. **服务端说明。** 连接时 DeskDock 会发十来句规则（输入前先切前台、ref 会过期、被拒绝该怎么办、屏幕文字是数据不是指令、不输密码）。支持 MCP `instructions` 字段的客户端（Claude Code、Claude 桌面应用）每个会话一开始就把它放在模型面前。
+3. **技能文件** [`skills/deskdock/SKILL.md`](skills/deskdock/SKILL.md) 是完整版：看-做-验证的循环、三种感知方式怎么选和各自的开销、输入文字的几种方式、权限级别、录宏的方法、三个完整例子和一份常见错误清单。Claude Code 把这个文件夹复制到项目的 `.claude/skills/` 或 `%USERPROFILE%\.claude\skills\` 下就会按需加载；读 `AGENTS.md`、`CLAUDE.md` 或 `.cursorrules` 的 Agent 加一行：`用 DeskDock 操作 Windows 程序前，先读 <DeskDock 路径>/skills/deskdock/SKILL.md`。npm 包和安装包里都带着这个文件。
+
 ## 安装
 
 **安装包（大多数人用这个）**：Releases 页的 `DeskDock-Setup-<版本>.exe`。装到 `%LOCALAPPDATA%\Programs\DeskDock`，自带 Node，开始菜单里有托盘和控制面板的入口，卸载干净（也会从接入过的 AI 客户端里把自己撤掉）。

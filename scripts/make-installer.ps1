@@ -18,6 +18,7 @@ try { npm ci --omit=dev --no-audit --no-fund --loglevel error --ignore-scripts }
 Remove-Item (Join-Path $stage "package-lock.json") -Force
 
 Copy-Item dist $stage\dist -Recurse
+Copy-Item skills $stage\skills -Recurse
 New-Item -ItemType Directory -Force $stage\resources | Out-Null
 Copy-Item resources\deskdock-native.exe, resources\deskdock.ico, resources\icon.png, resources\panel.html, resources\ocr.ps1 $stage\resources
 Copy-Item README.md, README.zh.md, LICENSE, PRIVACY.md, CHANGELOG.md, manifest.json $stage

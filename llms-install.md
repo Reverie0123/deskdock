@@ -31,6 +31,10 @@ No environment variables or API keys are needed. The permission table is created
 
 Call the `list_windows` tool: it should return the visible windows with their process names and permission levels. If `read_window` on an Electron app returns only three title-bar buttons, retry after a few seconds or use `read_screen_text`.
 
+## Teach the agent (optional)
+
+The package ships a playbook at `node_modules/deskdock/skills/deskdock/SKILL.md` (or `skills/deskdock/SKILL.md` in the repository). For Claude Code, copy that folder into `.claude/skills/`. For other agents, add a rule such as `Before operating Windows apps with DeskDock, read <path>/skills/deskdock/SKILL.md` to `AGENTS.md`, `CLAUDE.md` or `.cursorrules`.
+
 ## Uninstall
 
 ```bash

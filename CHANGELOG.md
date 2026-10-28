@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-10-28)
 
 First version.
 
@@ -10,3 +10,4 @@ First version.
 - Local control panel (policy editor, log table and timeline replay, macros) and a tray app (open panel, pause, logs, exit).
 - `deskdock setup` writes the server into Claude Code, Claude Desktop, Cursor, Cline and Windsurf configs, with backups.
 - Chinese and English interface following the system language.
+- Model guidance in three layers: tool descriptions, MCP server instructions sent on connect, and a skill file (`skills/deskdock/SKILL.md`) with the full playbook and worked examples.

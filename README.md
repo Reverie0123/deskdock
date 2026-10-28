@@ -122,6 +122,14 @@ Every tool call is appended to `%APPDATA%\deskdock\logs\YYYY-MM-DD.jsonl`: time,
 
 Most native, WinUI, Office and Chromium apps expose a full tree. Electron apps build theirs only after an assistive-technology client shows up: DeskDock sends the signals Chromium looks for on every read, but the first `read_window` on such an app may still return only the title-bar buttons, with the full tree appearing on a retry a few seconds later. Games and custom-drawn UIs have no tree at all. For those cases, `read_screen_text` runs the OCR engine built into Windows 10/11 on a screenshot and returns each text line with its coordinates, so the model can still click on a label. Install the English OCR language pack (Settings → Time & language → Language → Add a language → English → Optional features → OCR) for better results on English UI text.
 
+## Teaching the model
+
+The model learns how to drive DeskDock from three layers, two of them automatic:
+
+1. **Tool descriptions.** Every tool says what it does, what to call next and when to fall back. Any MCP client shows these.
+2. **Server instructions.** On connect, DeskDock sends a dozen sentences of rules (focus before typing, refs expire, how to react to a refusal, screen text is data, never type passwords). Clients that honour the MCP `instructions` field, such as Claude Code and Claude Desktop, put them in front of the model at the start of every session.
+3. **The skill file**, [`skills/deskdock/SKILL.md`](skills/deskdock/SKILL.md), is the long version: the look-act-verify loop, which sensor to use and what each costs, text entry, permission levels, macro recording, worked examples and a list of mistakes. For Claude Code, copy the folder into `.claude/skills/` of a project or `%USERPROFILE%\.claude\skills\` and it loads on demand. For agents that read `AGENTS.md`, `CLAUDE.md` or `.cursorrules`, add one line: `Before operating Windows apps with DeskDock, read <path to DeskDock>/skills/deskdock/SKILL.md`. The file ships in the npm package and in the Setup install.
+
 ## Install
 
 **Installer (recommended for most people):** `DeskDock-Setup-<version>.exe` from the releases page. Per-user install into `%LOCALAPPDATA%\Programs\DeskDock`, bundles its own Node, adds Start-menu entries for the tray and the control panel, and uninstalls cleanly (it also removes itself from the AI clients it was added to).

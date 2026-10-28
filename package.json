@@ -11,6 +11,7 @@
   "files": [
     "dist",
     "resources",
+    "skills",
     "manifest.json",
     "README.md",
     "README.zh.md",
